@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import time
 
-from src.extractor import extract_combined_field_mappings_from_folder
+from src.extractor import extract_combined_field_mappings_from_folder, extract_dynamic_mapping_column_from_folder_for_pi
 from src.cache import configure_cache, get_cache, ExcelCache
 
 
@@ -22,12 +22,19 @@ def process_single_folder(args):
         # Get cache instance if enabled
         cache = get_cache() if cache_enabled else None
 
-        # Always returns 3-tuple now
-        mappings, filename_info, expression_filenames = extract_combined_field_mappings_from_folder(
-            str(folder_path),
-            cache=cache,
-            use_cache=cache_enabled
-        )
+        # Choose extraction function based on module type
+        if module == 'PI':
+            mappings, filename_info, expression_filenames = extract_dynamic_mapping_column_from_folder_for_pi(
+                str(folder_path),
+                cache=cache,
+                use_cache=cache_enabled
+            )
+        else:
+            mappings, filename_info, expression_filenames = extract_combined_field_mappings_from_folder(
+                str(folder_path),
+                cache=cache,
+                use_cache=cache_enabled
+            )
 
         return {
             'success': True,
