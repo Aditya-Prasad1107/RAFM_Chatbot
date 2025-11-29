@@ -2,6 +2,8 @@
 Optimized Mapping ChatBot with parallel loading, caching, and natural language processing.
 Properly tracks and displays which filename each expression comes from.
 Includes Operator extraction from filenames and operator-based filtering.
+
+Enhanced with 45+ hierarchy navigation queries for exploring the data structure.
 """
 import re
 from pathlib import Path
@@ -12,6 +14,9 @@ import time
 
 from src.extractor import extract_combined_field_mappings_from_folder, extract_dynamic_mapping_column_from_folder_for_pi
 from src.cache import configure_cache, get_cache, ExcelCache
+from src.enhanced_parser import EnhancedQueryParser
+from src.hierarchy_queries import HierarchyQueryEngine
+from src.hierarchy_parser import HierarchyQueryParser
 
 
 def process_single_folder(args):
@@ -62,17 +67,21 @@ def process_single_folder(args):
 class MappingChatBot:
     """
     Natural language chatbot for querying field mappings from Excel files with caching support.
+
+    Now includes 45+ hierarchy navigation queries for exploring:
+    - Sources, Modules, Source Names, Vendors, Operators
+    - Counts, lists, filtering, grouping, and analytics
     """
 
     def __init__(
-        self,
-        root_folder: str,
-        use_parallel: bool = True,
-        max_workers: int = 4,
-        cache_enabled: bool = True,
-        cache_dir: str = "./cache",
-        cache_size_mb: int = 500,
-        cache_ttl_hours: int = 24
+            self,
+            root_folder: str,
+            use_parallel: bool = True,
+            max_workers: int = 4,
+            cache_enabled: bool = True,
+            cache_dir: str = "./cache",
+            cache_size_mb: int = 500,
+            cache_ttl_hours: int = 24
     ):
         """
         Initialize the chatbot.
@@ -98,6 +107,13 @@ class MappingChatBot:
         self.cache_size_mb = cache_size_mb
         self.cache_ttl_hours = cache_ttl_hours
         self.load_time = 0
+
+        # Enhanced parser - will be initialized after data loads
+        self.enhanced_parser = None
+
+        # Hierarchy query components - initialized after data loads
+        self.hierarchy_engine = None
+        self.hierarchy_parser = None
 
         # Configure cache
         if self.cache_enabled:
@@ -153,9 +169,9 @@ class MappingChatBot:
     def load_all_mappings(self):
         """Load all mappings from the folder structure."""
         start_time = time.time()
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("Scanning folder structure...")
-        print("="*70)
+        print("=" * 70)
 
         paths_to_process = self.scan_folder_structure()
         total = len(paths_to_process)
@@ -178,10 +194,21 @@ class MappingChatBot:
 
         self.load_time = time.time() - start_time
 
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print(f"* Successfully loaded {len(self.mappings_data)} vendor(s)")
         print(f"* Total time: {self.load_time:.2f} seconds")
-        print("="*70 + "\n")
+        print("=" * 70 + "\n")
+
+        # Initialize enhanced parser AFTER data is loaded
+        print("* Initializing enhanced query parser...")
+        self.enhanced_parser = EnhancedQueryParser(self)
+        print("* Enhanced parser ready! (Handles typos and variations)")
+
+        # Initialize hierarchy query components
+        print("* Initializing hierarchy query engine...")
+        self.hierarchy_engine = HierarchyQueryEngine(self)
+        self.hierarchy_parser = HierarchyQueryParser()
+        print("* Hierarchy query engine ready! (45+ navigation queries available)")
 
     def _load_parallel(self, paths_to_process):
         """Load mappings in parallel using ThreadPoolExecutor."""
@@ -212,10 +239,10 @@ class MappingChatBot:
     def _load_sequential(self, paths_to_process):
         """Load mappings sequentially with progress bar."""
         for folder_path, source, module, source_name, vendor in tqdm(
-            paths_to_process,
-            desc="Loading",
-            unit="folder",
-            ncols=100
+                paths_to_process,
+                desc="Loading",
+                unit="folder",
+                ncols=100
         ):
             result = process_single_folder((folder_path, source, module, source_name, vendor, self.cache_enabled))
 
@@ -229,10 +256,10 @@ class MappingChatBot:
                 print(f"* Error at {result.get('path', 'Unknown')}: {result.get('error', 'Unknown')}")
 
     def extract_operator_from_filename(
-        self,
-        filename: str,
-        source_name: str,
-        vendor: str
+            self,
+            filename: str,
+            source_name: str,
+            vendor: str
     ) -> str:
         """
         Extract operator name from filename by removing known parts.
@@ -298,7 +325,8 @@ class MappingChatBot:
                 continue
 
             # Skip common non-operator terms
-            skip_terms = {'ldrules', 'ld', 'rules', 'mapping', 'mappings', 'template', 'v1', 'v2', 'v3', 'final', 'new', 'old', 'copy'}
+            skip_terms = {'ldrules', 'ld', 'rules', 'mapping', 'mappings', 'template', 'v1', 'v2', 'v3', 'final', 'new',
+                          'old', 'copy'}
             if part_lower in skip_terms:
                 continue
 
@@ -722,7 +750,8 @@ class MappingChatBot:
 
         for idx, result in enumerate(display_results, 1):
             # Header with confidence indicator
-            confidence_indicator = "HIGH" if result['confidence_score'] >= 0.8 else "MED" if result['confidence_score'] >= 0.6 else "LOW"
+            confidence_indicator = "HIGH" if result['confidence_score'] >= 0.8 else "MED" if result[
+                                                                                                 'confidence_score'] >= 0.6 else "LOW"
             response += f"### [{idx}] `{result['field']}` [{confidence_indicator}] *{result['confidence_score']:.1%} confidence*\n\n"
 
             # Metadata with drill-down hierarchy including operator
@@ -784,11 +813,159 @@ class MappingChatBot:
         if query_lower in ['clear cache', 'clearcache', 'reset cache']:
             return self.clear_cache()
 
-        # Parse and search
-        parsed = self.parse_query(query)
+        if query_lower in ['hierarchy help', 'navigation help', 'nav help']:
+            return self.get_hierarchy_help()
+
+        # Try hierarchy query first if it looks like one
+        if self.hierarchy_parser and self.hierarchy_parser.is_hierarchy_query(query):
+            result = self._process_hierarchy_query(query)
+            if result:
+                return result
+
+        # Parse and search using ENHANCED parser
+        if self.enhanced_parser:
+            parsed = self.enhanced_parser.parse_query(query)
+        else:
+            # Fallback to old parser if enhanced not initialized
+            parsed = self.parse_query(query)
+
         results = self.search_mappings(parsed)
 
         return self.format_results(results)
+
+    def _process_hierarchy_query(self, query: str) -> Optional[str]:
+        """
+        Process a hierarchy navigation query.
+
+        Args:
+            query: User query string
+
+        Returns:
+            Formatted response or None if not a hierarchy query
+        """
+        if not self.hierarchy_parser or not self.hierarchy_engine:
+            return None
+
+        parsed = self.hierarchy_parser.parse(query)
+        if not parsed:
+            return None
+
+        # Route to appropriate engine method based on query type
+        result = self._execute_hierarchy_query(parsed)
+
+        if result:
+            return self.hierarchy_engine.format_result(result)
+
+        return None
+
+    def _execute_hierarchy_query(self, parsed):
+        """Execute a parsed hierarchy query."""
+        qt = parsed.query_type
+        engine = self.hierarchy_engine
+
+        # Global queries
+        if qt == "total_sources":
+            return engine.get_total_sources()
+        elif qt == "total_modules":
+            return engine.get_total_modules()
+        elif qt == "total_source_names":
+            return engine.get_total_source_names()
+        elif qt == "total_vendors":
+            return engine.get_total_vendors()
+        elif qt == "total_operators":
+            return engine.get_total_operators()
+        elif qt == "modules_grouped_by_source":
+            return engine.get_modules_grouped_by_source()
+        elif qt == "vendors_grouped_by_source":
+            return engine.get_vendors_grouped_by_source()
+        elif qt == "operators_grouped_by_vendor":
+            return engine.get_operators_grouped_by_vendor()
+        elif qt == "top_vendors_by_operators":
+            return engine.get_top_vendors_by_operators(parsed.top_n or 10)
+        elif qt == "top_sources_by_modules":
+            return engine.get_top_sources_by_modules(parsed.top_n or 10)
+        elif qt == "modules_with_zero_source_names":
+            return engine.get_modules_with_zero_source_names()
+        elif qt == "source_names_with_zero_vendors":
+            return engine.get_source_names_with_zero_vendors()
+        elif qt == "vendors_with_zero_operators":
+            return engine.get_vendors_with_zero_operators()
+        elif qt == "all_unique_source_names":
+            return engine.get_all_unique_source_names()
+        elif qt == "all_unique_vendor_names":
+            return engine.get_all_unique_vendor_names()
+        elif qt == "all_unique_operator_names":
+            return engine.get_all_unique_operator_names()
+
+        # From Source queries
+        elif qt == "modules_count_under_source" or qt == "modules_list_under_source":
+            return engine.get_modules_count_under_source(parsed.context_value)
+        elif qt == "source_names_count_under_source" or qt == "source_names_list_under_source":
+            return engine.get_source_names_count_under_source(parsed.context_value)
+        elif qt == "vendors_count_under_source" or qt == "vendors_list_under_source":
+            return engine.get_vendors_count_under_source(parsed.context_value)
+        elif qt == "operators_count_under_source" or qt == "operators_list_under_source":
+            return engine.get_operators_count_under_source(parsed.context_value)
+        elif qt == "vendors_with_min_operators_under_source":
+            return engine.get_vendors_with_min_operators_under_source(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "operators_matching_pattern_under_source":
+            return engine.get_operators_matching_pattern_under_source(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "source_names_containing_keyword_under_source":
+            return engine.get_source_names_containing_keyword_under_source(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "modules_with_min_source_names_under_source":
+            return engine.get_modules_with_min_source_names_under_source(
+                parsed.context_value, parsed.filter_value
+            )
+
+        # From Module queries
+        elif qt == "source_names_count_under_module" or qt == "source_names_list_under_module":
+            return engine.get_source_names_count_under_module(parsed.context_value)
+        elif qt == "vendors_count_under_module" or qt == "vendors_list_under_module":
+            return engine.get_vendors_count_under_module(parsed.context_value)
+        elif qt == "operators_count_under_module" or qt == "operators_list_under_module":
+            return engine.get_operators_count_under_module(parsed.context_value)
+        elif qt == "source_names_containing_keyword_under_module":
+            return engine.get_source_names_containing_keyword_under_module(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "vendors_with_min_operators_under_module":
+            return engine.get_vendors_with_min_operators_under_module(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "operators_matching_pattern_under_module":
+            return engine.get_operators_matching_pattern_under_module(
+                parsed.context_value, parsed.filter_value
+            )
+
+        # From Source Name queries
+        elif qt == "vendors_count_under_source_name" or qt == "vendors_list_under_source_name":
+            return engine.get_vendors_count_under_source_name(parsed.context_value)
+        elif qt == "operators_count_under_source_name" or qt == "operators_list_under_source_name":
+            return engine.get_operators_count_under_source_name(parsed.context_value)
+        elif qt == "vendors_with_min_operators_under_source_name":
+            return engine.get_vendors_with_min_operators_under_source_name(
+                parsed.context_value, parsed.filter_value
+            )
+        elif qt == "operators_matching_pattern_under_source_name":
+            return engine.get_operators_matching_pattern_under_source_name(
+                parsed.context_value, parsed.filter_value
+            )
+
+        # From Vendor queries
+        elif qt == "operators_count_under_vendor" or qt == "operators_list_under_vendor":
+            return engine.get_operators_count_under_vendor(parsed.context_value)
+        elif qt == "operators_matching_pattern_under_vendor":
+            return engine.get_operators_matching_pattern_under_vendor(
+                parsed.context_value, parsed.filter_value
+            )
+
+        return None
 
     def get_statistics(self) -> str:
         """Get statistics about loaded data."""
@@ -807,6 +984,16 @@ class MappingChatBot:
         response += f"- **Total Field Mappings:** {total_mappings:,}\n"
         response += f"- **Total Expressions:** {total_expressions:,}\n"
         response += f"- **Parallel Processing:** {'Enabled' if self.use_parallel else 'Disabled'}\n"
+
+        # Add hierarchy stats if available
+        if self.hierarchy_engine:
+            response += f"\n### Hierarchy Summary\n"
+            response += f"- **Sources:** {len(self.hierarchy_engine.sources)}\n"
+            response += f"- **Modules:** {len(self.hierarchy_engine.modules)}\n"
+            response += f"- **Source Names:** {len(self.hierarchy_engine.source_names)}\n"
+            response += f"- **Vendors:** {len(self.hierarchy_engine.vendors)}\n"
+            response += f"- **Operators:** {len(self.hierarchy_engine.operators)}\n"
+
         response += "\n### Top 10 by Mapping Count:\n"
 
         # Sort metadata by count
@@ -878,6 +1065,12 @@ class MappingChatBot:
 
         return response
 
+    def get_hierarchy_help(self) -> str:
+        """Return help text for hierarchy navigation queries."""
+        if self.hierarchy_parser:
+            return self.hierarchy_parser.get_help_text()
+        return "Hierarchy query engine not initialized."
+
     def get_help(self) -> str:
         """Return help text."""
         return """## Mapping ChatBot - Help Guide
@@ -908,12 +1101,34 @@ You can filter by any combination of:
 - **Vendor** - Fourth-level vendor folder
 - **Operator** - Extracted from filename (e.g., DU, Airtel, Vodafone)
 
+### Hierarchy Navigation Queries (NEW!)
+
+Explore the data structure with queries like:
+
+**Counts & Lists:**
+- "How many modules under source RA?"
+- "List vendors under module UC"
+- "Total number of operators"
+
+**Filtering:**
+- "Vendors under source RA with more than 3 operators"
+- "Operators matching pattern 'Air*' under vendor Nokia"
+- "Source names containing 'MSC' under module UC"
+
+**Analytics:**
+- "Top 5 vendors by operator count"
+- "Modules grouped by source"
+- "Vendors with zero operators"
+
+Type `hierarchy help` for full hierarchy query documentation.
+
 ### Special Commands
 
 - `list` or `sources` - List all available sources and vendors
 - `stats` - Show loading statistics and top vendors
 - `cache stats` or `cache` - Show cache performance statistics
 - `clear cache` - Clear all cached Excel files
+- `hierarchy help` - Show hierarchy navigation help
 - `help` - Show this help message
 
 ### Tips

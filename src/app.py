@@ -67,6 +67,11 @@ def create_chatbot_interface(root_folder: str):
     if not chatbot.mappings_data:
         print("\nWARNING: No data loaded! Please check your folder structure.")
 
+    # Get hierarchy stats for display
+    hierarchy_stats = ""
+    if chatbot.hierarchy_engine:
+        hierarchy_stats = f" | {len(chatbot.hierarchy_engine.sources)} sources, {len(chatbot.hierarchy_engine.operators)} operators"
+
     # Chat response function
     def respond(message, history):
         """Generate response for user message."""
@@ -83,7 +88,7 @@ def create_chatbot_interface(root_folder: str):
             # RAFM Chatbot
             ### Ask questions about field mappings in natural language
             
-            **Status:** Loaded **{len(chatbot.mappings_data)}** vendors in **{init_time:.2f}s**
+            **Status:** Loaded **{len(chatbot.mappings_data)}** vendors in **{init_time:.2f}s**{hierarchy_stats}
             """
         )
 
@@ -107,7 +112,7 @@ def create_chatbot_interface(root_folder: str):
         with gr.Row():
             clear = gr.Button("Clear Chat", scale=1)
 
-        with gr.Accordion("Example Queries", open=False):
+        with gr.Accordion("Example Queries - Field Mappings", open=False):
             gr.Examples(
                 examples=[
                     "Give me the mapping for field 'customer_id'",
@@ -117,14 +122,56 @@ def create_chatbot_interface(root_folder: str):
                     "Show dimension Sales field Revenue",
                     "get me logics for 'event_type' where source is RA, module is UC and source name is MSC and vendor is Nokia",
                     "get me logics for 'event_type' where source is RA, module is UC, source name is MSC, vendor is Nokia and operator is DU",
+                ],
+                inputs=msg,
+                label="Click any example to try it"
+            )
+
+        with gr.Accordion("Example Queries - Hierarchy Navigation (NEW!)", open=False):
+            gr.Examples(
+                examples=[
+                    # From Source
+                    "How many modules under source RA?",
+                    "List vendors under source RA",
+                    "Get number of operators under source RA",
+                    "Vendors under source RA with more than 2 operators",
+                    "Source names under source RA containing MSC",
+                    # From Module
+                    "How many vendors under module UC?",
+                    "List operators under module PI",
+                    "Vendors under module UC with more than 3 operators",
+                    # From Source Name
+                    "Number of vendors under source name MSC",
+                    "List operators under source name HLR",
+                    # From Vendor
+                    "How many operators under vendor Nokia?",
+                    "Operators under vendor Ericsson matching pattern Air*",
+                    # Global
+                    "Total number of sources",
+                    "Total number of operators",
+                    "Top 5 vendors with most operators",
+                    "Top 10 sources with most modules",
+                    "Modules grouped by source",
+                    "Operators grouped by vendor",
+                    "Vendors with zero operators",
+                    "All unique operator names",
+                ],
+                inputs=msg,
+                label="Click any example to try it"
+            )
+
+        with gr.Accordion("Special Commands", open=False):
+            gr.Examples(
+                examples=[
                     "list",
                     "stats",
                     "cache stats",
                     "clear cache",
+                    "hierarchy help",
                     "help"
                 ],
                 inputs=msg,
-                label="Click any example to try it"
+                label="Click any command to execute"
             )
 
         with gr.Accordion("Quick Reference", open=False):
@@ -135,14 +182,44 @@ def create_chatbot_interface(root_folder: str):
             - `stats` - View loading statistics
             - `cache stats` - View cache performance
             - `clear cache` - Clear all cached files
+            - `hierarchy help` - View hierarchy navigation help
             
-            ### Search Tips:
+            ### Field Mapping Search Tips:
             - Use quotes for exact field names: `'customer_id'`
             - All filters are optional and case-insensitive
             - Combine filters: `field 'email' vendor Oracle module CRM operator Airtel`
             - Results show the complete drill-down hierarchy including operator and filename
-            - **Operator** is extracted from filenames automatically
-            - Filter by operator: `... and operator is DU`
+            
+            ### Hierarchy Navigation Queries:
+            
+            **From Source:**
+            - Number/list of modules, source names, vendors, operators
+            - Vendors with more than X operators
+            - Operators matching pattern
+            - Source names containing keyword
+            - Modules with at least X source names
+            
+            **From Module:**
+            - Number/list of source names, vendors, operators
+            - Source names containing keyword
+            - Vendors with more than X operators
+            - Operators matching pattern
+            
+            **From Source Name:**
+            - Number/list of vendors, operators
+            - Vendors with more than X operators
+            - Operators matching pattern
+            
+            **From Vendor:**
+            - Number/list of operators
+            - Operators matching pattern
+            
+            **Global/System-Level:**
+            - Total counts (sources, modules, vendors, operators)
+            - Grouped by (modules by source, operators by vendor)
+            - Top N by count
+            - Items with zero children
+            - All unique names
             """)
 
         # Event handlers
@@ -189,7 +266,7 @@ def create_chatbot_interface(root_folder: str):
         clear.click(lambda: [], None, chatbot_ui, queue=False)
 
         gr.Markdown("---")
-        gr.Markdown("*Tip: Type 'help' for detailed usage instructions*")
+        gr.Markdown("*Tip: Type 'help' for detailed usage instructions or 'hierarchy help' for navigation queries*")
 
     return demo
 
@@ -218,7 +295,7 @@ def main():
 
     demo.launch(
         server_name="127.0.0.1",
-        server_port=8848,
+        server_port=8748,
         share=False,
         show_error=True,
         quiet=False
