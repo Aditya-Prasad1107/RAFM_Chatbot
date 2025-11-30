@@ -4,6 +4,9 @@ Properly tracks and displays which filename each expression comes from.
 Includes Operator extraction from filenames and operator-based filtering.
 
 Enhanced with 45+ hierarchy navigation queries for exploring the data structure.
+
+Hierarchy: Domain → Module → Source → Vendor → Operator
+All hierarchy values are stored and displayed in UPPERCASE.
 """
 import re
 from pathlib import Path
@@ -12,23 +15,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import time
 
-from src.extractor import extract_combined_field_mappings_from_folder, extract_dynamic_mapping_column_from_folder_for_pi
-from src.cache import configure_cache, get_cache, ExcelCache
-from src.enhanced_parser import EnhancedQueryParser
-from src.hierarchy_queries import HierarchyQueryEngine
-from src.hierarchy_parser import HierarchyQueryParser
+try:
+    from src.extractor import extract_combined_field_mappings_from_folder, extract_dynamic_mapping_column_from_folder_for_pi
+    from src.cache import configure_cache, get_cache, ExcelCache
+    from src.enhanced_parser import EnhancedQueryParser
+    from src.hierarchy_queries import HierarchyQueryEngine
+    from src.hierarchy_parser import HierarchyQueryParser
+except ImportError:
+    from extractor import extract_combined_field_mappings_from_folder, extract_dynamic_mapping_column_from_folder_for_pi
+    from cache import configure_cache, get_cache, ExcelCache
+    from enhanced_parser import EnhancedQueryParser
+    from hierarchy_queries import HierarchyQueryEngine
+    from hierarchy_parser import HierarchyQueryParser
 
 
 def process_single_folder(args):
     """Process a single LdRules folder (for parallel processing)"""
-    folder_path, source, module, source_name, vendor, cache_enabled = args
+    folder_path, domain, module, source, vendor, cache_enabled = args
 
     try:
-        # Get cache instance if enabled
         cache = get_cache() if cache_enabled else None
 
-        # Choose extraction function based on module type
-        if module == 'PI':
+        if module.upper() == 'PI':
             mappings, filename_info, expression_filenames = extract_dynamic_mapping_column_from_folder_for_pi(
                 str(folder_path),
                 cache=cache,
@@ -43,15 +51,15 @@ def process_single_folder(args):
 
         return {
             'success': True,
-            'key': (source, module, source_name, vendor),
+            'key': (domain, module, source, vendor),
             'mappings': mappings,
             'filename_info': filename_info,
             'expression_filenames': expression_filenames,
             'metadata': {
-                'source': source,
-                'module': module,
-                'source_name': source_name,
-                'vendor': vendor,
+                'domain': domain.upper(),
+                'module': module.upper(),
+                'source': source.upper(),
+                'vendor': vendor.upper(),
                 'path': str(folder_path),
                 'count': len(mappings)
             }
@@ -68,33 +76,20 @@ class MappingChatBot:
     """
     Natural language chatbot for querying field mappings from Excel files with caching support.
 
-    Now includes 45+ hierarchy navigation queries for exploring:
-    - Sources, Modules, Source Names, Vendors, Operators
-    - Counts, lists, filtering, grouping, and analytics
+    Hierarchy: Domain → Module → Source → Vendor → Operator
+    All hierarchy values stored in UPPERCASE.
     """
 
     def __init__(
-            self,
-            root_folder: str,
-            use_parallel: bool = True,
-            max_workers: int = 4,
-            cache_enabled: bool = True,
-            cache_dir: str = "./cache",
-            cache_size_mb: int = 500,
-            cache_ttl_hours: int = 24
+        self,
+        root_folder: str,
+        use_parallel: bool = True,
+        max_workers: int = 4,
+        cache_enabled: bool = True,
+        cache_dir: str = "./cache",
+        cache_size_mb: int = 500,
+        cache_ttl_hours: int = 24
     ):
-        """
-        Initialize the chatbot.
-
-        Args:
-            root_folder: Root folder containing Source/Module/SourceName/Vendor/LdRules structure
-            use_parallel: Whether to use parallel processing for loading
-            max_workers: Maximum number of parallel workers
-            cache_enabled: Whether to enable caching for Excel files
-            cache_dir: Directory to store cache files
-            cache_size_mb: Maximum cache size in MB
-            cache_ttl_hours: Time-to-live for cache entries in hours
-        """
         self.root_folder = root_folder
         self.mappings_data: Dict[Tuple[str, str, str, str], Dict[Tuple[str, str], List[str]]] = {}
         self.filename_data: Dict[Tuple[str, str, str, str], Dict[Tuple[str, str], List[str]]] = {}
@@ -108,14 +103,10 @@ class MappingChatBot:
         self.cache_ttl_hours = cache_ttl_hours
         self.load_time = 0
 
-        # Enhanced parser - will be initialized after data loads
         self.enhanced_parser = None
-
-        # Hierarchy query components - initialized after data loads
         self.hierarchy_engine = None
         self.hierarchy_parser = None
 
-        # Configure cache
         if self.cache_enabled:
             configure_cache(
                 cache_dir=self.cache_dir,
@@ -127,9 +118,7 @@ class MappingChatBot:
     def scan_folder_structure(self) -> List[Tuple]:
         """
         Scan the folder structure and return all LdRules paths.
-
-        Returns:
-            List of tuples: (ld_rules_path, source, module, source_name, vendor)
+        Structure: Domain/Module/Source/Vendor/LdRules
         """
         paths_to_process = []
         root_path = Path(self.root_folder)
@@ -137,23 +126,23 @@ class MappingChatBot:
         if not root_path.exists():
             raise FileNotFoundError(f"Root folder not found: {self.root_folder}")
 
-        # Navigate through Source/Module/SourceName/Vendor/LdRules
-        for source_dir in root_path.iterdir():
-            if not source_dir.is_dir():
+        # Navigate through Domain/Module/Source/Vendor/LdRules
+        for domain_dir in root_path.iterdir():
+            if not domain_dir.is_dir():
                 continue
-            source = source_dir.name
+            domain = domain_dir.name
 
-            for module_dir in source_dir.iterdir():
+            for module_dir in domain_dir.iterdir():
                 if not module_dir.is_dir():
                     continue
                 module = module_dir.name
 
-                for source_name_dir in module_dir.iterdir():
-                    if not source_name_dir.is_dir():
+                for source_dir in module_dir.iterdir():
+                    if not source_dir.is_dir():
                         continue
-                    source_name = source_name_dir.name
+                    source = source_dir.name
 
-                    for vendor_dir in source_name_dir.iterdir():
+                    for vendor_dir in source_dir.iterdir():
                         if not vendor_dir.is_dir():
                             continue
                         vendor = vendor_dir.name
@@ -161,7 +150,7 @@ class MappingChatBot:
                         ld_rules_path = vendor_dir / "LdRules"
                         if ld_rules_path.exists() and ld_rules_path.is_dir():
                             paths_to_process.append(
-                                (ld_rules_path, source, module, source_name, vendor)
+                                (ld_rules_path, domain, module, source, vendor)
                             )
 
         return paths_to_process
@@ -169,9 +158,9 @@ class MappingChatBot:
     def load_all_mappings(self):
         """Load all mappings from the folder structure."""
         start_time = time.time()
-        print("\n" + "=" * 70)
+        print("\n" + "="*70)
         print("Scanning folder structure...")
-        print("=" * 70)
+        print("="*70)
 
         paths_to_process = self.scan_folder_structure()
         total = len(paths_to_process)
@@ -194,17 +183,15 @@ class MappingChatBot:
 
         self.load_time = time.time() - start_time
 
-        print("\n" + "=" * 70)
+        print("\n" + "="*70)
         print(f"* Successfully loaded {len(self.mappings_data)} vendor(s)")
         print(f"* Total time: {self.load_time:.2f} seconds")
-        print("=" * 70 + "\n")
+        print("="*70 + "\n")
 
-        # Initialize enhanced parser AFTER data is loaded
         print("* Initializing enhanced query parser...")
         self.enhanced_parser = EnhancedQueryParser(self)
-        print("* Enhanced parser ready! (Handles typos and variations)")
+        print("* Enhanced parser ready!")
 
-        # Initialize hierarchy query components
         print("* Initializing hierarchy query engine...")
         self.hierarchy_engine = HierarchyQueryEngine(self)
         self.hierarchy_parser = HierarchyQueryParser()
@@ -238,13 +225,13 @@ class MappingChatBot:
 
     def _load_sequential(self, paths_to_process):
         """Load mappings sequentially with progress bar."""
-        for folder_path, source, module, source_name, vendor in tqdm(
-                paths_to_process,
-                desc="Loading",
-                unit="folder",
-                ncols=100
+        for folder_path, domain, module, source, vendor in tqdm(
+            paths_to_process,
+            desc="Loading",
+            unit="folder",
+            ncols=100
         ):
-            result = process_single_folder((folder_path, source, module, source_name, vendor, self.cache_enabled))
+            result = process_single_folder((folder_path, domain, module, source, vendor, self.cache_enabled))
 
             if result['success']:
                 key = result['key']
@@ -256,109 +243,69 @@ class MappingChatBot:
                 print(f"* Error at {result.get('path', 'Unknown')}: {result.get('error', 'Unknown')}")
 
     def extract_operator_from_filename(
-            self,
-            filename: str,
-            source_name: str,
-            vendor: str
+        self,
+        filename: str,
+        source: str,
+        vendor: str
     ) -> str:
-        """
-        Extract operator name from filename by removing known parts.
-
-        Logic:
-        1. Remove 'LdRules' prefix (case-insensitive)
-        2. Remove source_name (case-insensitive)
-        3. Remove vendor (case-insensitive)
-        4. Remove numeric values
-        5. Remove common separators and clean up
-        6. What remains is the operator name
-
-        Args:
-            filename: The Excel filename (without extension)
-            source_name: The source name from folder structure
-            vendor: The vendor name from folder structure
-
-        Returns:
-            Extracted operator name or "Unknown" if not found
-        """
+        """Extract operator name from filename by removing known parts."""
         if not filename:
-            return "Unknown"
+            return "UNKNOWN"
 
-        # Start with the filename
         remaining = filename
 
-        # Create patterns to remove (case-insensitive)
         patterns_to_remove = [
-            r'(?i)^LdRules[_\-\s]*',  # LdRules at start
-            r'(?i)[_\-\s]*LdRules$',  # LdRules at end
-            r'(?i)[_\-\s]*LdRules[_\-\s]*',  # LdRules anywhere
+            r'(?i)^LdRules[_\-\s]*',
+            r'(?i)[_\-\s]*LdRules$',
+            r'(?i)[_\-\s]*LdRules[_\-\s]*',
         ]
 
-        # Remove LdRules
         for pattern in patterns_to_remove:
             remaining = re.sub(pattern, '_', remaining)
 
-        # Split by common separators
         parts = re.split(r'[_\-\s]+', remaining)
 
-        # Filter out parts that match source_name, vendor, or are numeric
         filtered_parts = []
-        source_name_lower = source_name.lower()
+        source_lower = source.lower()
         vendor_lower = vendor.lower()
 
         for part in parts:
             part_lower = part.lower().strip()
 
-            # Skip empty parts
             if not part_lower:
                 continue
 
-            # Skip if it matches source_name (exact or partial)
-            if part_lower == source_name_lower or source_name_lower in part_lower or part_lower in source_name_lower:
+            if part_lower == source_lower or source_lower in part_lower or part_lower in source_lower:
                 continue
 
-            # Skip if it matches vendor (exact or partial)
             if part_lower == vendor_lower or vendor_lower in part_lower or part_lower in vendor_lower:
                 continue
 
-            # Skip if it's purely numeric
             if part_lower.isdigit():
                 continue
 
-            # Skip common non-operator terms
-            skip_terms = {'ldrules', 'ld', 'rules', 'mapping', 'mappings', 'template', 'v1', 'v2', 'v3', 'final', 'new',
-                          'old', 'copy'}
+            skip_terms = {'ldrules', 'ld', 'rules', 'mapping', 'mappings', 'template', 'v1', 'v2', 'v3', 'final', 'new', 'old', 'copy'}
             if part_lower in skip_terms:
                 continue
 
             filtered_parts.append(part)
 
-        # Join remaining parts
         if filtered_parts:
-            # Return the first meaningful part as operator (usually the operator name)
-            # If multiple parts remain, join them
             operator = '_'.join(filtered_parts)
-            return operator if operator else "Unknown"
+            return operator.upper() if operator else "UNKNOWN"
 
-        return "Unknown"
+        return "UNKNOWN"
 
     def parse_query(self, query: str) -> Dict[str, Optional[str]]:
-        """
-        Enhanced natural language query parser with operator support.
-
-        Args:
-            query: Natural language query string
-
-        Returns:
-            Dictionary with extracted entities: field, source, module, source_name, vendor, operator
-        """
+        """Enhanced natural language query parser with operator support."""
         query_lower = query.lower()
 
         result = {
             'field': None,
             'dimension': None,
-            'source': None,
+            'domain': None,
             'module': None,
-            'source_name': None,
+            'source': None,
             'vendor': None,
             'operator': None
         }
@@ -393,6 +340,19 @@ class MappingChatBot:
                 result['dimension'] = match.group(1)
                 break
 
+        # === DOMAIN EXTRACTION ===
+        domain_patterns = [
+            r"(?:in|for|from)\s+domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:where|and)\s+(?:my\s+)?domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+        ]
+
+        for pattern in domain_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                result['domain'] = match.group(1).upper()
+                break
+
         # === MODULE EXTRACTION ===
         module_patterns = [
             r"(?:in|for|from)\s+module\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
@@ -403,36 +363,21 @@ class MappingChatBot:
         for pattern in module_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                result['module'] = match.group(1)
-                break
-
-        # === SOURCE NAME EXTRACTION ===
-        source_name_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"(?:in|for|from)\s+source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"(?:where|and)\s+(?:my\s+)?sourcename\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-        ]
-
-        for pattern in source_name_patterns:
-            match = re.search(pattern, query_lower)
-            if match:
-                result['source_name'] = match.group(1)
+                result['module'] = match.group(1).upper()
                 break
 
         # === SOURCE EXTRACTION ===
         source_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
+            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
         ]
 
         for pattern in source_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                if "source name" not in query_lower[match.start():match.end() + 10]:
-                    result['source'] = match.group(1)
-                    break
+                result['source'] = match.group(1).upper()
+                break
 
         # === VENDOR EXTRACTION ===
         vendor_patterns = [
@@ -444,7 +389,7 @@ class MappingChatBot:
         for pattern in vendor_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                result['vendor'] = match.group(1).strip()
+                result['vendor'] = match.group(1).upper()
                 break
 
         # === OPERATOR EXTRACTION ===
@@ -457,18 +402,13 @@ class MappingChatBot:
         for pattern in operator_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                result['operator'] = match.group(1).strip()
+                result['operator'] = match.group(1).upper()
                 break
 
         return result
 
     def calculate_field_match_score(self, query_field: str, target_field: str) -> Tuple[float, str]:
-        """
-        Calculate a confidence score for field matching.
-
-        Returns:
-            Tuple of (score, match_type)
-        """
+        """Calculate a confidence score for field matching."""
         query_norm = query_field.lower().strip()
         target_norm = target_field.lower().strip()
 
@@ -544,15 +484,8 @@ class MappingChatBot:
         """Filter out invalid expressions like #REF! errors."""
         valid_expressions = []
         invalid_patterns = [
-            r'#ref!',
-            r'#n/a',
-            r'#value!',
-            r'#name\?',
-            r'#null!',
-            r'#div/0!',
-            r'^\s*-\s*$',
-            r'^\s*$',
-            r'^n/a\s*$',
+            r'#ref!', r'#n/a', r'#value!', r'#name\?',
+            r'#null!', r'#div/0!', r'^\s*-\s*$', r'^\s*$', r'^n/a\s*$',
         ]
 
         for expr in expressions:
@@ -572,119 +505,85 @@ class MappingChatBot:
         return valid_expressions
 
     def operator_matches(self, query_operator: str, extracted_operator: str) -> bool:
-        """
-        Check if the query operator matches the extracted operator.
-        Uses case-insensitive partial matching.
-
-        Args:
-            query_operator: Operator from user query
-            extracted_operator: Operator extracted from filename
-
-        Returns:
-            True if operators match
-        """
+        """Check if the query operator matches the extracted operator."""
         if not query_operator or not extracted_operator:
             return False
 
-        query_op_lower = query_operator.lower().strip()
-        extracted_op_lower = extracted_operator.lower().strip()
+        query_op_upper = query_operator.upper().strip()
+        extracted_op_upper = extracted_operator.upper().strip()
 
-        # Exact match
-        if query_op_lower == extracted_op_lower:
+        if query_op_upper == extracted_op_upper:
             return True
 
-        # Partial match (query is contained in extracted or vice versa)
-        if query_op_lower in extracted_op_lower or extracted_op_lower in query_op_lower:
+        if query_op_upper in extracted_op_upper or extracted_op_upper in query_op_upper:
             return True
 
         return False
 
     def search_mappings(self, parsed_query: Dict[str, Optional[str]]) -> List[Dict]:
-        """
-        Search for mappings based on parsed query with improved accuracy.
-        Each result includes the specific filename and operator for each expression.
-
-        Args:
-            parsed_query: Dictionary with search criteria
-
-        Returns:
-            List of matching results with confidence scores
-        """
+        """Search for mappings based on parsed query."""
         results = []
 
         field = parsed_query.get('field')
         dimension = parsed_query.get('dimension')
-        source = parsed_query.get('source')
+        domain = parsed_query.get('domain')
         module = parsed_query.get('module')
-        source_name = parsed_query.get('source_name')
+        source = parsed_query.get('source')
         vendor = parsed_query.get('vendor')
         operator = parsed_query.get('operator')
 
-        # Support multiple vendors separated by "or"
         vendors_list = []
         if vendor:
-            vendors_list = [v.strip() for v in re.split(r'\s+or\s+|\s+and\s+', vendor.lower())]
+            vendors_list = [v.strip().upper() for v in re.split(r'\s+or\s+|\s+and\s+', vendor)]
 
-        # Filter by metadata (source, module, etc.)
         for key, mappings in self.mappings_data.items():
-            src, mod, src_name, vend = key
+            dom, mod, src, vend = key
 
-            # Apply metadata filters (case-insensitive partial matching)
-            if source and source.lower() not in src.lower():
+            # Apply metadata filters (case-insensitive)
+            if domain and domain.upper() not in dom.upper():
                 continue
-            if module and module.lower() not in mod.lower():
+            if module and module.upper() not in mod.upper():
                 continue
-            if source_name and source_name.lower() not in src_name.lower():
+            if source and source.upper() not in src.upper():
                 continue
 
-            # Vendor matching
             if vendor:
                 vendor_matched = False
                 for v in vendors_list:
-                    if v in vend.lower():
+                    if v in vend.upper():
                         vendor_matched = True
                         break
                 if not vendor_matched:
                     continue
 
-            # Get filename data for this vendor
             vendor_filename_info = self.filename_data.get(key, {})
             vendor_expression_filenames = self.expression_filenames_data.get(key, {})
 
-            # Search within mappings
             for mapping_key, expressions in mappings.items():
                 left_val, field_val = mapping_key
 
-                # Filter out invalid expressions
                 valid_expressions = self.filter_valid_expressions(expressions)
 
                 if not valid_expressions:
                     continue
 
-                # Apply field filter with confidence scoring
                 field_score = 1.0
                 field_match_type = "no_filter"
                 if field:
                     field_score, field_match_type = self.calculate_field_match_score(field, field_val)
-
                     if field_score < 0.4:
                         continue
 
-                # Apply dimension filter
                 if dimension and dimension.lower() not in left_val.lower():
                     continue
 
-                # Get expression filenames for this mapping
                 expr_filenames = vendor_expression_filenames.get(mapping_key, [])
                 unique_filenames = vendor_filename_info.get(mapping_key, [])
 
-                # Calculate overall confidence score
                 expression_quality_score = min(len(valid_expressions) / 5, 1.0)
                 overall_score = (field_score * 0.7) + (expression_quality_score * 0.3)
 
-                # Create individual results for each expression with its filename and operator
                 for i, expression in enumerate(valid_expressions):
-                    # Get the filename for this specific expression
                     if i < len(expr_filenames):
                         filename = expr_filenames[i]
                     elif unique_filenames:
@@ -692,52 +591,37 @@ class MappingChatBot:
                     else:
                         filename = "Unknown"
 
-                    # Extract operator from filename
-                    extracted_operator = self.extract_operator_from_filename(filename, src_name, vend)
+                    extracted_operator = self.extract_operator_from_filename(filename, src, vend)
 
-                    # Apply operator filter if specified
                     if operator and not self.operator_matches(operator, extracted_operator):
                         continue
 
                     results.append({
-                        'source': src,
-                        'module': mod,
-                        'source_name': src_name,
-                        'vendor': vend,
+                        'domain': dom.upper(),
+                        'module': mod.upper(),
+                        'source': src.upper(),
+                        'vendor': vend.upper(),
                         'dimension': left_val,
                         'field': field_val,
                         'expression': expression,
                         'filename': filename,
-                        'operator': extracted_operator,
+                        'operator': extracted_operator.upper(),
                         'confidence_score': overall_score,
                         'field_match_score': field_score,
                         'field_match_type': field_match_type,
                     })
 
-        # Sort by confidence score (highest first), then by operator, then by filename
         results.sort(key=lambda x: (-x['confidence_score'], x['operator'], x['filename']))
-
         return results
 
     def format_results(self, results: List[Dict], max_results: int = 50) -> str:
-        """
-        Format search results for display with confidence scores.
-        Each expression is displayed with its corresponding filename and operator.
-
-        Args:
-            results: List of search results
-            max_results: Maximum number of results to display
-
-        Returns:
-            Formatted string for display
-        """
+        """Format search results for display."""
         if not results:
             return "* No mappings found matching your criteria."
 
         total = len(results)
         display_results = results[:max_results]
 
-        # Calculate accuracy metrics
         high_confidence_count = sum(1 for r in display_results if r['confidence_score'] >= 0.7)
         avg_confidence = sum(r['confidence_score'] for r in display_results) / len(display_results)
 
@@ -749,100 +633,117 @@ class MappingChatBot:
         response += f" ({high_confidence_count}/{len(display_results)} high-confidence results)\n\n"
 
         for idx, result in enumerate(display_results, 1):
-            # Header with confidence indicator
-            confidence_indicator = "HIGH" if result['confidence_score'] >= 0.8 else "MED" if result[
-                                                                                                 'confidence_score'] >= 0.6 else "LOW"
+            confidence_indicator = "HIGH" if result['confidence_score'] >= 0.8 else "MED" if result['confidence_score'] >= 0.6 else "LOW"
             response += f"### [{idx}] `{result['field']}` [{confidence_indicator}] *{result['confidence_score']:.1%} confidence*\n\n"
 
-            # Metadata with drill-down hierarchy including operator
             response += f"- **Dimension/Measure:** `{result['dimension']}`\n"
-            response += f"- **Source:** {result['source']} → **Module:** {result['module']} → **Source Name:** {result['source_name']} → **Vendor:** {result['vendor']} → **Operator:** {result['operator']}\n"
+            response += f"- **Domain:** {result['domain']} → **Module:** {result['module']} → **Source:** {result['source']} → **Vendor:** {result['vendor']} → **Operator:** {result['operator']}\n"
             response += f"- **File:** `{result['filename']}`\n"
-
-            # Add match quality information
             response += f"- **Field Match:** {result['field_match_type'].replace('_', ' ').title()} ({result['field_match_score']:.1%})\n"
 
             response += "\n"
-
-            # Expression
             response += f"**Expression:**\n\n"
             response += f"```sql\n{result['expression']}\n```\n\n"
-
             response += "---\n\n"
 
         return response
 
     def process_query(self, query) -> str:
-        """
-        Process a natural language query and return formatted results.
+        """Process a natural language query and return formatted results."""
+        import ast
 
-        Args:
-            query: Natural language query string or list (from new Gradio format)
-
-        Returns:
-            Formatted response string
-        """
-        # Handle new Gradio 6.0.1 message format
+        # Handle various input formats from Gradio
         if isinstance(query, list) and len(query) > 0:
             last_message = query[-1]
-            if isinstance(last_message, dict) and 'content' in last_message:
-                query = last_message['content']
+            if isinstance(last_message, dict):
+                # Format: {'content': '...', 'role': 'user'} or {'text': '...', 'type': 'text'}
+                query = last_message.get('content') or last_message.get('text', str(last_message))
             elif isinstance(last_message, str):
                 query = last_message
             else:
                 query = str(query)
 
+        # Handle stringified list format: "[{'text': '/help', 'type': 'text'}]"
+        if isinstance(query, str) and query.startswith('[{') and query.endswith('}]'):
+            try:
+                parsed_list = ast.literal_eval(query)
+                if isinstance(parsed_list, list) and len(parsed_list) > 0:
+                    first_item = parsed_list[0]
+                    if isinstance(first_item, dict):
+                        query = first_item.get('text') or first_item.get('content', query)
+            except (ValueError, SyntaxError):
+                pass  # Keep original query if parsing fails
+
         if not isinstance(query, str) or not query.strip():
             return "* Please enter a query."
 
-        # Handle special commands
-        query_lower = query.lower().strip()
+        query_stripped = query.strip()
+        query_lower = query_stripped.lower()
 
-        if query_lower in ['help', 'h', '?']:
-            return self.get_help()
+        # === SPECIAL COMMANDS (start with /) ===
+        if query_stripped.startswith('/'):
+            return self._process_special_command(query_stripped)
 
-        if query_lower in ['list', 'show all', 'list all', 'sources']:
-            return self.list_all_sources()
-
-        if query_lower in ['stats', 'statistics', 'info']:
-            return self.get_statistics()
-
-        if query_lower in ['cache stats', 'cache', 'cachestats']:
-            return self.get_cache_statistics()
-
-        if query_lower in ['clear cache', 'clearcache', 'reset cache']:
-            return self.clear_cache()
-
-        if query_lower in ['hierarchy help', 'navigation help', 'nav help']:
-            return self.get_hierarchy_help()
-
-        # Try hierarchy query first if it looks like one
+        # Try hierarchy query
         if self.hierarchy_parser and self.hierarchy_parser.is_hierarchy_query(query):
             result = self._process_hierarchy_query(query)
             if result:
                 return result
 
-        # Parse and search using ENHANCED parser
+        # Parse and search using enhanced parser
         if self.enhanced_parser:
             parsed = self.enhanced_parser.parse_query(query)
         else:
-            # Fallback to old parser if enhanced not initialized
             parsed = self.parse_query(query)
 
         results = self.search_mappings(parsed)
-
         return self.format_results(results)
 
+    def _process_special_command(self, command: str) -> str:
+        """Process special commands starting with /"""
+        cmd = command.lower().strip()
+
+        # /help
+        if cmd in ['/help', '/h', '/?']:
+            return self.get_help()
+
+        # /list or /domains
+        if cmd in ['/list', '/domains']:
+            return self.list_all_domains()
+
+        # /stats
+        if cmd in ['/stats', '/statistics', '/info']:
+            return self.get_statistics()
+
+        # /hierarchy
+        if cmd in ['/hierarchy', '/nav', '/navigation']:
+            return self.get_hierarchy_help()
+
+        # /vendors
+        if cmd == '/vendors':
+            return self.list_all_vendors()
+
+        # /operators
+        if cmd == '/operators':
+            return self.list_all_operators()
+
+        # /modules
+        if cmd == '/modules':
+            return self.list_all_modules()
+
+        # /sources
+        if cmd == '/sources':
+            return self.list_all_sources()
+
+        # /examples
+        if cmd in ['/examples', '/example']:
+            return self.get_examples()
+
+        # Unknown command
+        return f"❌ Unknown command: `{command}`\n\nType `/help` to see available commands."
+
     def _process_hierarchy_query(self, query: str) -> Optional[str]:
-        """
-        Process a hierarchy navigation query.
-
-        Args:
-            query: User query string
-
-        Returns:
-            Formatted response or None if not a hierarchy query
-        """
+        """Process a hierarchy navigation query."""
         if not self.hierarchy_parser or not self.hierarchy_engine:
             return None
 
@@ -850,7 +751,6 @@ class MappingChatBot:
         if not parsed:
             return None
 
-        # Route to appropriate engine method based on query type
         result = self._execute_hierarchy_query(parsed)
 
         if result:
@@ -864,74 +764,74 @@ class MappingChatBot:
         engine = self.hierarchy_engine
 
         # Global queries
-        if qt == "total_sources":
-            return engine.get_total_sources()
+        if qt == "total_domains":
+            return engine.get_total_domains()
         elif qt == "total_modules":
             return engine.get_total_modules()
-        elif qt == "total_source_names":
-            return engine.get_total_source_names()
+        elif qt == "total_sources":
+            return engine.get_total_sources()
         elif qt == "total_vendors":
             return engine.get_total_vendors()
         elif qt == "total_operators":
             return engine.get_total_operators()
-        elif qt == "modules_grouped_by_source":
-            return engine.get_modules_grouped_by_source()
-        elif qt == "vendors_grouped_by_source":
-            return engine.get_vendors_grouped_by_source()
+        elif qt == "modules_grouped_by_domain":
+            return engine.get_modules_grouped_by_domain()
+        elif qt == "vendors_grouped_by_domain":
+            return engine.get_vendors_grouped_by_domain()
         elif qt == "operators_grouped_by_vendor":
             return engine.get_operators_grouped_by_vendor()
         elif qt == "top_vendors_by_operators":
             return engine.get_top_vendors_by_operators(parsed.top_n or 10)
-        elif qt == "top_sources_by_modules":
-            return engine.get_top_sources_by_modules(parsed.top_n or 10)
-        elif qt == "modules_with_zero_source_names":
-            return engine.get_modules_with_zero_source_names()
-        elif qt == "source_names_with_zero_vendors":
-            return engine.get_source_names_with_zero_vendors()
+        elif qt == "top_domains_by_modules":
+            return engine.get_top_domains_by_modules(parsed.top_n or 10)
+        elif qt == "modules_with_zero_sources":
+            return engine.get_modules_with_zero_sources()
+        elif qt == "sources_with_zero_vendors":
+            return engine.get_sources_with_zero_vendors()
         elif qt == "vendors_with_zero_operators":
             return engine.get_vendors_with_zero_operators()
-        elif qt == "all_unique_source_names":
-            return engine.get_all_unique_source_names()
+        elif qt == "all_unique_sources":
+            return engine.get_all_unique_sources()
         elif qt == "all_unique_vendor_names":
             return engine.get_all_unique_vendor_names()
         elif qt == "all_unique_operator_names":
             return engine.get_all_unique_operator_names()
 
-        # From Source queries
-        elif qt == "modules_count_under_source" or qt == "modules_list_under_source":
-            return engine.get_modules_count_under_source(parsed.context_value)
-        elif qt == "source_names_count_under_source" or qt == "source_names_list_under_source":
-            return engine.get_source_names_count_under_source(parsed.context_value)
-        elif qt == "vendors_count_under_source" or qt == "vendors_list_under_source":
-            return engine.get_vendors_count_under_source(parsed.context_value)
-        elif qt == "operators_count_under_source" or qt == "operators_list_under_source":
-            return engine.get_operators_count_under_source(parsed.context_value)
-        elif qt == "vendors_with_min_operators_under_source":
-            return engine.get_vendors_with_min_operators_under_source(
+        # From Domain queries
+        elif qt == "modules_count_under_domain" or qt == "modules_list_under_domain":
+            return engine.get_modules_count_under_domain(parsed.context_value)
+        elif qt == "sources_count_under_domain" or qt == "sources_list_under_domain":
+            return engine.get_sources_count_under_domain(parsed.context_value)
+        elif qt == "vendors_count_under_domain" or qt == "vendors_list_under_domain":
+            return engine.get_vendors_count_under_domain(parsed.context_value)
+        elif qt == "operators_count_under_domain" or qt == "operators_list_under_domain":
+            return engine.get_operators_count_under_domain(parsed.context_value)
+        elif qt == "vendors_with_min_operators_under_domain":
+            return engine.get_vendors_with_min_operators_under_domain(
                 parsed.context_value, parsed.filter_value
             )
-        elif qt == "operators_matching_pattern_under_source":
-            return engine.get_operators_matching_pattern_under_source(
+        elif qt == "operators_matching_pattern_under_domain":
+            return engine.get_operators_matching_pattern_under_domain(
                 parsed.context_value, parsed.filter_value
             )
-        elif qt == "source_names_containing_keyword_under_source":
-            return engine.get_source_names_containing_keyword_under_source(
+        elif qt == "sources_containing_keyword_under_domain":
+            return engine.get_sources_containing_keyword_under_domain(
                 parsed.context_value, parsed.filter_value
             )
-        elif qt == "modules_with_min_source_names_under_source":
-            return engine.get_modules_with_min_source_names_under_source(
+        elif qt == "modules_with_min_sources_under_domain":
+            return engine.get_modules_with_min_sources_under_domain(
                 parsed.context_value, parsed.filter_value
             )
 
         # From Module queries
-        elif qt == "source_names_count_under_module" or qt == "source_names_list_under_module":
-            return engine.get_source_names_count_under_module(parsed.context_value)
+        elif qt == "sources_count_under_module" or qt == "sources_list_under_module":
+            return engine.get_sources_count_under_module(parsed.context_value)
         elif qt == "vendors_count_under_module" or qt == "vendors_list_under_module":
             return engine.get_vendors_count_under_module(parsed.context_value)
         elif qt == "operators_count_under_module" or qt == "operators_list_under_module":
             return engine.get_operators_count_under_module(parsed.context_value)
-        elif qt == "source_names_containing_keyword_under_module":
-            return engine.get_source_names_containing_keyword_under_module(
+        elif qt == "sources_containing_keyword_under_module":
+            return engine.get_sources_containing_keyword_under_module(
                 parsed.context_value, parsed.filter_value
             )
         elif qt == "vendors_with_min_operators_under_module":
@@ -943,17 +843,17 @@ class MappingChatBot:
                 parsed.context_value, parsed.filter_value
             )
 
-        # From Source Name queries
-        elif qt == "vendors_count_under_source_name" or qt == "vendors_list_under_source_name":
-            return engine.get_vendors_count_under_source_name(parsed.context_value)
-        elif qt == "operators_count_under_source_name" or qt == "operators_list_under_source_name":
-            return engine.get_operators_count_under_source_name(parsed.context_value)
-        elif qt == "vendors_with_min_operators_under_source_name":
-            return engine.get_vendors_with_min_operators_under_source_name(
+        # From Source queries
+        elif qt == "vendors_count_under_source" or qt == "vendors_list_under_source":
+            return engine.get_vendors_count_under_source(parsed.context_value)
+        elif qt == "operators_count_under_source" or qt == "operators_list_under_source":
+            return engine.get_operators_count_under_source(parsed.context_value)
+        elif qt == "vendors_with_min_operators_under_source":
+            return engine.get_vendors_with_min_operators_under_source(
                 parsed.context_value, parsed.filter_value
             )
-        elif qt == "operators_matching_pattern_under_source_name":
-            return engine.get_operators_matching_pattern_under_source_name(
+        elif qt == "operators_matching_pattern_under_source":
+            return engine.get_operators_matching_pattern_under_source(
                 parsed.context_value, parsed.filter_value
             )
 
@@ -976,93 +876,86 @@ class MappingChatBot:
             for expressions in mappings.values()
         )
 
-        response = """## Statistics
-
-"""
+        response = "## 📊 Statistics\n\n"
         response += f"- **Load Time:** {self.load_time:.2f} seconds\n"
         response += f"- **Total Vendors:** {len(self.mappings_data)}\n"
         response += f"- **Total Field Mappings:** {total_mappings:,}\n"
         response += f"- **Total Expressions:** {total_expressions:,}\n"
-        response += f"- **Parallel Processing:** {'Enabled' if self.use_parallel else 'Disabled'}\n"
 
-        # Add hierarchy stats if available
         if self.hierarchy_engine:
             response += f"\n### Hierarchy Summary\n"
-            response += f"- **Sources:** {len(self.hierarchy_engine.sources)}\n"
+            response += f"- **Domains:** {len(self.hierarchy_engine.domains)}\n"
             response += f"- **Modules:** {len(self.hierarchy_engine.modules)}\n"
-            response += f"- **Source Names:** {len(self.hierarchy_engine.source_names)}\n"
+            response += f"- **Sources:** {len(self.hierarchy_engine.sources)}\n"
             response += f"- **Vendors:** {len(self.hierarchy_engine.vendors)}\n"
             response += f"- **Operators:** {len(self.hierarchy_engine.operators)}\n"
 
-        response += "\n### Top 10 by Mapping Count:\n"
-
-        # Sort metadata by count
-        sorted_meta = sorted(
-            self.metadata,
-            key=lambda x: x.get('count', 0),
-            reverse=True
-        )[:10]
-
-        for i, meta in enumerate(sorted_meta, 1):
-            response += f"\n{i}. **{meta['source']}/{meta['module']}/{meta['vendor']}**: {meta.get('count', 0)} mappings"
-
         return response
 
-    def get_cache_statistics(self) -> str:
-        """Get cache performance statistics."""
-        if not self.cache_enabled:
-            return "## Cache Statistics\n\n* Cache is disabled."
+    def list_all_domains(self) -> str:
+        """List all available domains in the system."""
+        response = "## 🏢 Available Domains\n\n"
 
-        cache = get_cache()
-        stats = cache.get_cache_stats()
-
-        response = """## Cache Statistics
-
-"""
-        response += f"- **Cache Enabled**: Yes\n"
-        response += f"- **Cache Directory**: `{stats['cache_dir']}`\n"
-        response += f"- **Cache Size**: {stats['cache_size_mb']} MB\n"
-        response += f"- **Cache Hits**: {stats['hits']}\n"
-        response += f"- **Cache Misses**: {stats['misses']}\n"
-        response += f"- **Hit Rate**: {stats['hit_rate_percent']}%\n"
-        response += f"- **Total Files Processed**: {stats['total_files_processed']}\n"
-        response += f"- **Errors**: {stats['errors']}\n"
-
-        return response
-
-    def clear_cache(self) -> str:
-        """Clear all cache files."""
-        if not self.cache_enabled:
-            return "* Cache is disabled. Cannot clear cache."
-
-        try:
-            cache = get_cache()
-            cache.clear_cache()
-            return "* Cache cleared successfully! All cached Excel files have been removed."
-        except Exception as e:
-            return f"* Error clearing cache: {str(e)}"
-
-    def list_all_sources(self) -> str:
-        """List all available sources in the system."""
-        response = "## Available Data Sources\n\n"
-
-        # Group by source
-        by_source = {}
+        by_domain = {}
         for meta in self.metadata:
-            source = meta['source']
-            if source not in by_source:
-                by_source[source] = []
-            by_source[source].append(meta)
+            domain = meta['domain']
+            if domain not in by_domain:
+                by_domain[domain] = []
+            by_domain[domain].append(meta)
 
-        for source, items in sorted(by_source.items()):
-            response += f"### **{source}**\n\n"
+        for domain, items in sorted(by_domain.items()):
+            response += f"### **{domain}**\n\n"
             for meta in items:
                 response += (
-                    f"   - {meta['module']} → {meta['source_name']} → "
+                    f"- {meta['module']} → {meta['source']} → "
                     f"{meta['vendor']} *({meta.get('count', 0)} mappings)*\n"
                 )
             response += "\n"
 
+        return response
+
+    def list_all_vendors(self) -> str:
+        """List all unique vendors."""
+        if not self.hierarchy_engine:
+            return "❌ Hierarchy engine not initialized."
+
+        vendors = sorted(self.hierarchy_engine.vendors)
+        response = f"## 🏭 All Vendors ({len(vendors)})\n\n"
+        for vendor in vendors:
+            response += f"- {vendor}\n"
+        return response
+
+    def list_all_operators(self) -> str:
+        """List all unique operators."""
+        if not self.hierarchy_engine:
+            return "❌ Hierarchy engine not initialized."
+
+        operators = sorted(self.hierarchy_engine.operators)
+        response = f"## 📡 All Operators ({len(operators)})\n\n"
+        for operator in operators:
+            response += f"- {operator}\n"
+        return response
+
+    def list_all_modules(self) -> str:
+        """List all unique modules."""
+        if not self.hierarchy_engine:
+            return "❌ Hierarchy engine not initialized."
+
+        modules = sorted(self.hierarchy_engine.modules)
+        response = f"## 📦 All Modules ({len(modules)})\n\n"
+        for module in modules:
+            response += f"- {module}\n"
+        return response
+
+    def list_all_sources(self) -> str:
+        """List all unique sources."""
+        if not self.hierarchy_engine:
+            return "❌ Hierarchy engine not initialized."
+
+        sources = sorted(self.hierarchy_engine.sources)
+        response = f"## 📂 All Sources ({len(sources)})\n\n"
+        for source in sources:
+            response += f"- {source}\n"
         return response
 
     def get_hierarchy_help(self) -> str:
@@ -1071,86 +964,97 @@ class MappingChatBot:
             return self.hierarchy_parser.get_help_text()
         return "Hierarchy query engine not initialized."
 
+    def get_examples(self) -> str:
+        """Return example queries."""
+        return """## 📝 Example Queries
+
+### Field Mapping Queries
+```
+Give me the mapping for field 'customer_id'
+Show mapping for AccountNumber from domain RA
+What is the mapping for 'email' vendor Oracle
+Find all mappings in module CRM
+get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU
+```
+
+### Hierarchy Navigation Queries
+```
+How many modules under domain RA?
+List vendors under domain RA
+Total number of operators
+Top 5 vendors with most operators
+Modules grouped by domain
+Vendors with zero operators
+```
+
+### Special Commands
+```
+/help       - Show help guide
+/list       - List all domains
+/stats      - Show statistics
+/hierarchy  - Hierarchy navigation help
+/vendors    - List all vendors
+/operators  - List all operators
+/modules    - List all modules
+/sources    - List all sources
+/examples   - Show this examples list
+```
+"""
+
     def get_help(self) -> str:
         """Return help text."""
-        return """## Mapping ChatBot - Help Guide
+        return """## 📚 Mapping ChatBot - Help Guide
+
+### Hierarchy Structure
+**Domain → Module → Source → Vendor → Operator**
+
+All hierarchy values are displayed in UPPERCASE.
 
 ### Natural Language Queries
 
 Ask questions naturally! The bot understands various formats:
 
 **Example Queries:**
-
 - "Give me the mapping for field 'customer_id'"
-- "Show mapping for AccountNumber from source SAP"
+- "Show mapping for AccountNumber from domain RA"
 - "What is the mapping for 'email' vendor Oracle"
 - "Find field address in module CRM"
-- "All mappings for vendor Salesforce"
-- "Show dimension Sales field Revenue"
-- "get me logics for 'event_type' where source is RA, module is UC, source name is MSC, vendor is Nokia and operator is DU"
+- "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU"
 
 ### Search Filters
 
 You can filter by any combination of:
-
 - **Field Name** - The target field you're looking for
-- **Dimension/Measure** - The left column value (Dim./Meas.)
-- **Source** - Top-level source folder
-- **Module** - Second-level module folder
-- **Source Name** - Third-level source name folder
-- **Vendor** - Fourth-level vendor folder
-- **Operator** - Extracted from filename (e.g., DU, Airtel, Vodafone)
+- **Dimension/Measure** - The left column value
+- **Domain** - Top-level domain folder (e.g., RA, FM)
+- **Module** - Second-level module folder (e.g., UC, PI)
+- **Source** - Third-level source folder (e.g., MSC, HLR)
+- **Vendor** - Fourth-level vendor folder (e.g., Nokia, Ericsson)
+- **Operator** - Extracted from filename (e.g., DU, AIRTEL)
 
-### Hierarchy Navigation Queries (NEW!)
+### Hierarchy Navigation Queries
 
 Explore the data structure with queries like:
-
-**Counts & Lists:**
-- "How many modules under source RA?"
+- "How many modules under domain RA?"
 - "List vendors under module UC"
-- "Total number of operators"
-
-**Filtering:**
-- "Vendors under source RA with more than 3 operators"
-- "Operators matching pattern 'Air*' under vendor Nokia"
-- "Source names containing 'MSC' under module UC"
-
-**Analytics:**
 - "Top 5 vendors by operator count"
-- "Modules grouped by source"
+- "Modules grouped by domain"
 - "Vendors with zero operators"
-
-Type `hierarchy help` for full hierarchy query documentation.
 
 ### Special Commands
 
-- `list` or `sources` - List all available sources and vendors
-- `stats` - Show loading statistics and top vendors
-- `cache stats` or `cache` - Show cache performance statistics
-- `clear cache` - Clear all cached Excel files
-- `hierarchy help` - Show hierarchy navigation help
-- `help` - Show this help message
-
-### Tips
-
-* All filters are **optional** and **case-insensitive**
-* Use quotes for exact matches: `'customer_id'`
-* Partial matches work: "SAP" will match "SAP_PROD"
-* Combine filters for precise results
-* Results show dimension/measure alongside field name
-* **Operator** is automatically extracted from filenames
-
-### Understanding Results
-
-Each result shows:
-- **Dimension/Measure** - Category from column B
-- **Field** - Field name from column C
-- **Expression** - Mapping value from column D
-- **Drill-down Hierarchy** - Source → Module → Source Name → Vendor → Operator
-- **File** - The Excel file where this expression was found
-- **Operator** - Extracted from the filename
+| Command | Description |
+|---------|-------------|
+| `/help` | Show this help guide |
+| `/list` | List all domains with hierarchy |
+| `/stats` | Show statistics |
+| `/hierarchy` | Hierarchy navigation help |
+| `/vendors` | List all vendors |
+| `/operators` | List all operators |
+| `/modules` | List all modules |
+| `/sources` | List all sources |
+| `/examples` | Show example queries |
 
 ---
-
-**Happy Searching!**
+**Tip:** Type `/examples` to see sample queries!
 """

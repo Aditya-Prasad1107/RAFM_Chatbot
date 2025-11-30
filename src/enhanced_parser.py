@@ -1,6 +1,8 @@
 """
 Enhanced Query Parser with Fuzzy Matching
 Handles typos in keywords while keeping filter values exact.
+
+Hierarchy: Domain → Module → Source → Vendor → Operator
 """
 import re
 from typing import Dict, Optional, List
@@ -12,10 +14,12 @@ class EnhancedQueryParser:
     Fast, free, typo-tolerant query parser using fuzzy matching.
 
     Features:
-    - Fuzzy matches KEYWORDS (vendor, module, source, etc.) to fix typos
+    - Fuzzy matches KEYWORDS (vendor, module, domain, source, etc.) to fix typos
     - Keeps FILTER VALUES exact (Nokia, RA, DU, etc.)
     - Handles natural language variations
     - <10ms per query
+
+    Hierarchy: Domain → Module → Source → Vendor → Operator
     """
 
     def __init__(self, chatbot_instance=None):
@@ -50,10 +54,10 @@ class EnhancedQueryParser:
                 'fld', 'feild', 'feeld', 'colum'  # Common typos
             ],
 
-            # Source keyword
-            'source': [
-                'source', 'src', 'from',
-                'sourse', 'sorce', 'souce'  # Common typos
+            # Domain keyword (was 'source' in old terminology)
+            'domain': [
+                'domain', 'dom', 'domains',
+                'doamin', 'domian', 'domein'  # Common typos
             ],
 
             # Module keyword
@@ -62,10 +66,10 @@ class EnhancedQueryParser:
                 'moduel', 'modul', 'modulee'  # Common typos
             ],
 
-            # Source Name keyword
-            'source_name': [
-                'source_name', 'sourcename', 'source name', 'src_name', 'srcname',
-                'sourse_name', 'source_nam'  # Common typos
+            # Source keyword (was 'source_name' in old terminology)
+            'source': [
+                'source', 'src', 'sources',
+                'sourse', 'sorce', 'souce'  # Common typos
             ],
 
             # Vendor keyword
@@ -169,12 +173,12 @@ class EnhancedQueryParser:
                     normalized_words.append('logics')  # Standardize target
                 elif matched == 'field':
                     normalized_words.append('field')
-                elif matched == 'source':
-                    normalized_words.append('source')
+                elif matched == 'domain':
+                    normalized_words.append('domain')
                 elif matched == 'module':
                     normalized_words.append('module')
-                elif matched == 'source_name':
-                    normalized_words.append('source_name')
+                elif matched == 'source':
+                    normalized_words.append('source')
                 elif matched == 'vendor':
                     normalized_words.append('vendor')
                 elif matched == 'operator':
@@ -204,7 +208,7 @@ class EnhancedQueryParser:
             query: Natural language query
 
         Returns:
-            Dictionary with: field, dimension, source, module, source_name, vendor, operator
+            Dictionary with: field, dimension, domain, module, source, vendor, operator
 
         Examples:
             >>> parse_query("give me logics for 'cdr_type' where vendor is Nokia")
@@ -220,9 +224,9 @@ class EnhancedQueryParser:
         result = {
             'field': None,
             'dimension': None,
-            'source': None,
+            'domain': None,
             'module': None,
-            'source_name': None,
+            'source': None,
             'vendor': None,
             'operator': None
         }
@@ -236,7 +240,7 @@ class EnhancedQueryParser:
             r"field[s]?\s+['\"]([^'\"]+)['\"]",  # field 'name'
             r"(?:logics|mapping|expression)[s]?\s+for\s+['\"]([^'\"]+)['\"]",  # logics for 'name'
             r"['\"]([^'\"]+)['\"]",  # just 'field_name'
-            r"(?:for|of)\s+(\w+)(?:\s+where|\s+vendor|\s+source|\s+module|\s+operator|$)",  # for field_name
+            r"(?:for|of)\s+(\w+)(?:\s+where|\s+vendor|\s+domain|\s+source|\s+module|\s+operator|$)",  # for field_name
             r"field[s]?\s+(\w+)",  # field name
         ]
 
@@ -259,8 +263,25 @@ class EnhancedQueryParser:
                 result['dimension'] = match.group(1)
                 break
 
+        # === DOMAIN EXTRACTION ===
+        domain_patterns = [
+            r"(?:where|and)\s+(?:my\s+)?domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:in|for|from)\s+domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+        ]
+
+        for pattern in domain_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                # Keep EXACT case from original query, convert to UPPERCASE
+                original_match = re.search(pattern, normalized_query, re.IGNORECASE)
+                if original_match:
+                    result['domain'] = original_match.group(1).upper()
+                else:
+                    result['domain'] = match.group(1).upper()
+                break
+
         # === MODULE EXTRACTION ===
-        # Look for: "module is X", "module X", "in module X"
         module_patterns = [
             r"(?:where|and)\s+(?:my\s+)?module\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
             r"(?:in|for|from)\s+module\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
@@ -270,52 +291,29 @@ class EnhancedQueryParser:
         for pattern in module_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                # Keep EXACT case from original query
                 original_match = re.search(pattern, normalized_query, re.IGNORECASE)
                 if original_match:
-                    result['module'] = original_match.group(1)
+                    result['module'] = original_match.group(1).upper()
                 else:
-                    result['module'] = match.group(1).upper()  # Default to uppercase
-                break
-
-        # === SOURCE NAME EXTRACTION ===
-        # Must come BEFORE source extraction to avoid conflicts
-        source_name_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source[_\s]name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"(?:in|for|from)\s+source[_\s]name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"source[_\s]name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-        ]
-
-        for pattern in source_name_patterns:
-            match = re.search(pattern, query_lower)
-            if match:
-                original_match = re.search(pattern, normalized_query, re.IGNORECASE)
-                if original_match:
-                    result['source_name'] = original_match.group(1)
-                else:
-                    result['source_name'] = match.group(1)
+                    result['module'] = match.group(1).upper()
                 break
 
         # === SOURCE EXTRACTION ===
-        # Negative lookahead to avoid matching "source name"
         source_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
+            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
         ]
 
         for pattern in source_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                # Double-check we didn't catch "source name"
-                context = query_lower[max(0, match.start()-5):min(len(query_lower), match.end()+10)]
-                if "source_name" not in context and "source name" not in context:
-                    original_match = re.search(pattern, normalized_query, re.IGNORECASE)
-                    if original_match:
-                        result['source'] = original_match.group(1)
-                    else:
-                        result['source'] = match.group(1).upper()
-                    break
+                original_match = re.search(pattern, normalized_query, re.IGNORECASE)
+                if original_match:
+                    result['source'] = original_match.group(1).upper()
+                else:
+                    result['source'] = match.group(1).upper()
+                break
 
         # === VENDOR EXTRACTION ===
         vendor_patterns = [
@@ -327,12 +325,11 @@ class EnhancedQueryParser:
         for pattern in vendor_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                # Keep exact case
                 original_match = re.search(pattern, normalized_query, re.IGNORECASE)
                 if original_match:
-                    result['vendor'] = original_match.group(1).strip()
+                    result['vendor'] = original_match.group(1).strip().upper()
                 else:
-                    result['vendor'] = match.group(1).strip()
+                    result['vendor'] = match.group(1).strip().upper()
                 break
 
         # === OPERATOR EXTRACTION ===
@@ -345,12 +342,11 @@ class EnhancedQueryParser:
         for pattern in operator_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                # Keep exact case
                 original_match = re.search(pattern, normalized_query, re.IGNORECASE)
                 if original_match:
-                    result['operator'] = original_match.group(1).strip()
+                    result['operator'] = original_match.group(1).strip().upper()
                 else:
-                    result['operator'] = match.group(1).strip()
+                    result['operator'] = match.group(1).strip().upper()
                 break
 
         return result
@@ -371,8 +367,8 @@ class EnhancedQueryParser:
         if "'" not in query and '"' not in query:
             suggestions.append("Try putting field name in quotes: 'field_name'")
 
-        if not any(kw in query.lower() for kw in ['vendor', 'source', 'module', 'operator']):
-            suggestions.append("Add filters like: vendor Nokia, source RA, module PI")
+        if not any(kw in query.lower() for kw in ['vendor', 'domain', 'source', 'module', 'operator']):
+            suggestions.append("Add filters like: vendor Nokia, domain RA, module PI")
 
         # Check for possible typos in keywords
         words = query.lower().split()

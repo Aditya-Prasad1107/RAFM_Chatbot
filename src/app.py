@@ -6,47 +6,28 @@ import time
 from pathlib import Path
 
 import gradio as gr
-from src.chatbot import MappingChatBot
 
-# Custom CSS for better UI
+try:
+    from src.chatbot import MappingChatBot
+except ImportError:
+    from chatbot import MappingChatBot
+
 CUSTOM_CSS = """
 .gradio-container {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     max-width: 1400px !important;
 }
-
-.message {
-    padding: 10px;
-    border-radius: 8px;
-    margin: 5px 0;
-}
-
 footer {
     display: none !important;
 }
-
 #chatbot {
     height: 600px;
-}
-
-.contain {
-    max-width: 100% !important;
 }
 """
 
 
 def create_chatbot_interface(root_folder: str):
-    """
-    Create and configure the Gradio interface.
-
-    Args:
-        root_folder: Path to the root folder containing the data structure
-
-    Returns:
-        Gradio Blocks interface
-    """
-
-    # Initialize chatbot
+    """Create and configure the Gradio interface."""
     print("\n" + "="*70)
     print("Initializing Mapping ChatBot...")
     print("="*70)
@@ -64,31 +45,26 @@ def create_chatbot_interface(root_folder: str):
     chatbot.load_all_mappings()
     init_time = time.time() - start
 
-    if not chatbot.mappings_data:
-        print("\nWARNING: No data loaded! Please check your folder structure.")
-
-    # Get hierarchy stats for display
     hierarchy_stats = ""
     if chatbot.hierarchy_engine:
-        hierarchy_stats = f" | {len(chatbot.hierarchy_engine.sources)} sources, {len(chatbot.hierarchy_engine.operators)} operators"
+        hierarchy_stats = f" | {len(chatbot.hierarchy_engine.domains)} domains, {len(chatbot.hierarchy_engine.operators)} operators"
 
-    # Chat response function
     def respond(message, history):
-        """Generate response for user message."""
         response = chatbot.process_query(message)
         return response
 
-    # Create Gradio interface
     with gr.Blocks(title="Mapping ChatBot") as demo:
         demo.theme = gr.themes.Soft()
         demo.css = CUSTOM_CSS
 
         gr.Markdown(
             f"""
-            # RAFM Chatbot
+            # 🔍 RAFM Chatbot
             ### Ask questions about field mappings in natural language
             
             **Status:** Loaded **{len(chatbot.mappings_data)}** vendors in **{init_time:.2f}s**{hierarchy_stats}
+            
+            **Hierarchy:** Domain → Module → Source → Vendor → Operator (all UPPERCASE)
             """
         )
 
@@ -101,7 +77,7 @@ def create_chatbot_interface(root_folder: str):
 
         with gr.Row():
             msg = gr.Textbox(
-                placeholder="Ask about field mappings... (e.g., 'Show mapping for customer_id')",
+                placeholder="Ask about field mappings or type /help for commands...",
                 show_label=False,
                 scale=9,
                 container=False,
@@ -112,46 +88,41 @@ def create_chatbot_interface(root_folder: str):
         with gr.Row():
             clear = gr.Button("Clear Chat", scale=1)
 
-        with gr.Accordion("Example Queries - Field Mappings", open=False):
+        with gr.Accordion("📝 Example Queries - Field Mappings", open=False):
             gr.Examples(
                 examples=[
                     "Give me the mapping for field 'customer_id'",
-                    "Show mapping for AccountNumber from source SAP",
+                    "Show mapping for AccountNumber from domain RA",
                     "What is the mapping for 'email' vendor Oracle",
                     "Find all mappings in module CRM",
                     "Show dimension Sales field Revenue",
-                    "get me logics for 'event_type' where source is RA, module is UC and source name is MSC and vendor is Nokia",
-                    "get me logics for 'event_type' where source is RA, module is UC, source name is MSC, vendor is Nokia and operator is DU",
+                    "get me logics for 'event_type' where domain is RA, module is UC and source is MSC and vendor is Nokia",
+                    "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU",
                 ],
                 inputs=msg,
                 label="Click any example to try it"
             )
 
-        with gr.Accordion("Example Queries - Hierarchy Navigation (NEW!)", open=False):
+        with gr.Accordion("🗂️ Example Queries - Hierarchy Navigation", open=False):
             gr.Examples(
                 examples=[
-                    # From Source
-                    "How many modules under source RA?",
-                    "List vendors under source RA",
-                    "Get number of operators under source RA",
-                    "Vendors under source RA with more than 2 operators",
-                    "Source names under source RA containing MSC",
-                    # From Module
+                    "How many modules under domain RA?",
+                    "List vendors under domain RA",
+                    "Get number of operators under domain RA",
+                    "Vendors under domain RA with more than 2 operators",
+                    "Sources under domain RA containing MSC",
                     "How many vendors under module UC?",
                     "List operators under module PI",
                     "Vendors under module UC with more than 3 operators",
-                    # From Source Name
-                    "Number of vendors under source name MSC",
-                    "List operators under source name HLR",
-                    # From Vendor
+                    "Number of vendors under source MSC",
+                    "List operators under source HLR",
                     "How many operators under vendor Nokia?",
                     "Operators under vendor Ericsson matching pattern Air*",
-                    # Global
-                    "Total number of sources",
+                    "Total number of domains",
                     "Total number of operators",
                     "Top 5 vendors with most operators",
-                    "Top 10 sources with most modules",
-                    "Modules grouped by source",
+                    "Top 10 domains with most modules",
+                    "Modules grouped by domain",
                     "Operators grouped by vendor",
                     "Vendors with zero operators",
                     "All unique operator names",
@@ -160,78 +131,63 @@ def create_chatbot_interface(root_folder: str):
                 label="Click any example to try it"
             )
 
-        with gr.Accordion("Special Commands", open=False):
+        with gr.Accordion("⚡ Special Commands", open=False):
             gr.Examples(
                 examples=[
-                    "list",
-                    "stats",
-                    "cache stats",
-                    "clear cache",
-                    "hierarchy help",
-                    "help"
+                    "/help",
+                    "/list",
+                    "/stats",
+                    "/hierarchy",
+                    "/vendors",
+                    "/operators",
+                    "/modules",
+                    "/sources",
+                    "/examples"
                 ],
                 inputs=msg,
                 label="Click any command to execute"
             )
 
-        with gr.Accordion("Quick Reference", open=False):
+        with gr.Accordion("📖 Quick Reference", open=False):
             gr.Markdown("""
-            ### Commands:
-            - `help` - Detailed help guide
-            - `list` or `sources` - View all available sources
-            - `stats` - View loading statistics
-            - `cache stats` - View cache performance
-            - `clear cache` - Clear all cached files
-            - `hierarchy help` - View hierarchy navigation help
+            ### Hierarchy Structure
+            **Domain → Module → Source → Vendor → Operator**
             
-            ### Field Mapping Search Tips:
+            All values are displayed in UPPERCASE.
+            
+            ### Special Commands (start with /)
+            | Command | Description |
+            |---------|-------------|
+            | `/help` | Show help guide |
+            | `/list` | List all domains with hierarchy |
+            | `/stats` | Show statistics |
+            | `/hierarchy` | Hierarchy navigation help |
+            | `/vendors` | List all vendors |
+            | `/operators` | List all operators |
+            | `/modules` | List all modules |
+            | `/sources` | List all sources |
+            | `/examples` | Show example queries |
+            
+            ### Field Mapping Search Tips
             - Use quotes for exact field names: `'customer_id'`
             - All filters are optional and case-insensitive
             - Combine filters: `field 'email' vendor Oracle module CRM operator Airtel`
-            - Results show the complete drill-down hierarchy including operator and filename
             
-            ### Hierarchy Navigation Queries:
-            
-            **From Source:**
-            - Number/list of modules, source names, vendors, operators
-            - Vendors with more than X operators
-            - Operators matching pattern
-            - Source names containing keyword
-            - Modules with at least X source names
-            
-            **From Module:**
-            - Number/list of source names, vendors, operators
-            - Source names containing keyword
-            - Vendors with more than X operators
-            - Operators matching pattern
-            
-            **From Source Name:**
-            - Number/list of vendors, operators
-            - Vendors with more than X operators
-            - Operators matching pattern
-            
-            **From Vendor:**
-            - Number/list of operators
-            - Operators matching pattern
-            
-            **Global/System-Level:**
-            - Total counts (sources, modules, vendors, operators)
-            - Grouped by (modules by source, operators by vendor)
-            - Top N by count
-            - Items with zero children
-            - All unique names
+            ### Hierarchy Navigation Queries
+            - **Counts:** "How many modules under domain RA?"
+            - **Lists:** "List vendors under module UC"
+            - **Filters:** "Vendors with more than 3 operators under domain RA"
+            - **Patterns:** "Operators matching pattern 'Air*'"
+            - **Global:** "Top 5 vendors by operator count"
             """)
 
-        # Event handlers
         def user_message(message, history):
-            """Add user message to chat."""
             if not history:
                 history = []
             new_history = history + [{"role": "user", "content": message}]
             return "", new_history
 
         def bot_response(history):
-            """Generate and add bot response."""
             if not history:
                 return []
             user_msg = history[-1]["content"] if history[-1]["role"] == "user" else ""
@@ -239,7 +195,6 @@ def create_chatbot_interface(root_folder: str):
             history.append({"role": "assistant", "content": bot_msg})
             return history
 
-        # Submit on Enter or button click
         msg.submit(
             user_message,
             [msg, chatbot_ui],
@@ -262,31 +217,25 @@ def create_chatbot_interface(root_folder: str):
             chatbot_ui
         )
 
-        # Clear chat
         clear.click(lambda: [], None, chatbot_ui, queue=False)
 
         gr.Markdown("---")
-        gr.Markdown("*Tip: Type 'help' for detailed usage instructions or 'hierarchy help' for navigation queries*")
+        gr.Markdown("*💡 Tip: Type `/help` for detailed usage instructions or `/examples` for sample queries*")
 
     return demo
 
 
 def main():
-    """Main entry point for the application."""
-
-    # Configuration - Use environment variable or default path
     ROOT_FOLDER = os.getenv(
         "MAPPING_ROOT_FOLDER",
         r"C:\Users\aditya.prasad\OneDrive - Mobileum\Documents\OneDrive - Mobileum\Tejas N's files - Templates"
     )
 
-    # Validate path
     if not Path(ROOT_FOLDER).exists():
         print(f"\nERROR: Root folder not found: {ROOT_FOLDER}")
         print("Please set MAPPING_ROOT_FOLDER environment variable or update ROOT_FOLDER in src/app.py")
         return
 
-    # Create and launch interface
     demo = create_chatbot_interface(ROOT_FOLDER)
 
     print("\n" + "="*70)
@@ -295,7 +244,7 @@ def main():
 
     demo.launch(
         server_name="127.0.0.1",
-        server_port=8748,
+        server_port=8948,
         share=False,
         show_error=True,
         quiet=False
