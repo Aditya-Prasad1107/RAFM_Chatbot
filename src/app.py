@@ -15,12 +15,6 @@ from src.layout_extractor import read_excel_content, format_layout_content_text
 def create_chatbot_interface(root_folder: str):
     """
     Create and configure the Gradio interface.
-
-    Args:
-        root_folder: Path to the root folder containing the data structure
-
-    Returns:
-        Gradio Blocks interface
     """
 
     # Initialize chatbot
@@ -85,14 +79,16 @@ def create_chatbot_interface(root_folder: str):
         with gr.Row():
             clear = gr.Button("Clear Chat")
 
-        # Layout Panel (collapsible accordion)
-        with gr.Accordion("Layout Viewer", open=False, visible=False) as layout_panel:
-            layout_info = gr.Markdown("Select an operator to view layout content")
+        # Layout Panel - using Accordion that starts visible but closed
+        with gr.Accordion("Layout Viewer", open=False) as layout_panel:
+            layout_info = gr.Markdown("*Query a layout to see available operators*")
 
-            operator_buttons = gr.Radio(
+            # Use Dropdown instead of Radio for better compatibility
+            operator_dropdown = gr.Dropdown(
                 choices=[],
-                label="Available Operators",
-                interactive=True
+                label="Select Operator",
+                interactive=True,
+                allow_custom_value=False
             )
 
             with gr.Row():
@@ -108,7 +104,7 @@ def create_chatbot_interface(root_folder: str):
             )
 
             # File output for download
-            download_file = gr.File(label="Click to download", visible=True)
+            download_file = gr.File(label="Click to download")
 
         with gr.Accordion("Example Queries", open=False):
             gr.Examples(
@@ -117,9 +113,7 @@ def create_chatbot_interface(root_folder: str):
                     "Show mapping for AccountNumber from source MSC",
                     "What is the mapping for 'email' vendor Oracle",
                     "Find all mappings in module CRM",
-                    "Show dimension Sales field Revenue",
                     "get me logics for 'event_type' where domain is RA, module is UC and source is MSC and vendor is Nokia",
-                    "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU",
                     "show layout for domain RA, module UC, source MSC, vendor Nokia",
                     "list",
                     "stats",
@@ -135,19 +129,13 @@ def create_chatbot_interface(root_folder: str):
             - `help` - Detailed help guide
             - `list` or `sources` - View all available domains
             - `stats` - View loading statistics
-            - `cache stats` - View cache performance
-            - `clear cache` - Clear all cached files
 
             ### Mapping Queries:
             - Use quotes for exact field names: `'customer_id'`
-            - Combine filters: `field 'email' vendor Oracle module CRM operator Airtel`
-            - Results show hierarchy: Domain → Module → Source → Vendor → Operator
+            - Combine filters: `field 'email' vendor Oracle module CRM`
 
             ### Layout Queries:
             - `show layout for domain X, module Y, source Z, vendor W`
-            - `give me the format for domain X, module Y, source Z, vendor W`
-            - Click operator buttons to view content
-            - Download original file or copy content
             """)
 
         # ==================== Event Handlers ====================
@@ -155,7 +143,7 @@ def create_chatbot_interface(root_folder: str):
         def process_message(message, history, state):
             """Process user message and update UI accordingly."""
             if not message or not message.strip():
-                return "", history or [], state, gr.update(), gr.update(), "", "", None
+                return "", history or [], state, gr.update(), "", "", None
 
             if not history:
                 history = []
@@ -168,11 +156,11 @@ def create_chatbot_interface(root_folder: str):
                 response, metadata = chatbot.process_layout_query(message)
 
                 if metadata and metadata['type'] == 'layout_operators' and metadata['result']['success']:
-                    # Update state with layout info
                     result = metadata['result']
 
-                    # Convert Path objects to strings in operators dict
+                    # Convert Path objects to strings
                     operators_str = {k: str(v) for k, v in result['operators'].items()}
+                    operators_list = list(operators_str.keys())
 
                     state = {
                         'active': True,
@@ -183,21 +171,21 @@ def create_chatbot_interface(root_folder: str):
                         'operators': operators_str,
                         'current_file_path': None
                     }
-                    operators_list = list(operators_str.keys())
 
                     history.append({"role": "assistant", "content": response})
+
+                    # Return with updated dropdown
                     return (
-                        "",  # clear message
+                        "",
                         history,
                         state,
-                        gr.update(visible=True, open=True),  # show layout panel
-                        gr.update(choices=operators_list, value=operators_list[0] if operators_list else None),
-                        f"**{result['domain']}/{result['module']}/{result['source']}/{result['vendor']}** - Select an operator and click 'View Layout'",
-                        "",  # clear content
-                        None  # no file
+                        gr.Dropdown(choices=operators_list, value=operators_list[0] if operators_list else None),
+                        f"**{result['domain']}/{result['module']}/{result['source']}/{result['vendor']}** - Select operator and click 'View Layout'",
+                        "",
+                        None
                     )
+
                 elif metadata and metadata['type'] == 'layout_content' and metadata['result']['success']:
-                    # Direct content display (operator was specified)
                     result = metadata['result']
                     content = result['content']
                     text_content = format_layout_content_text(content)
@@ -214,26 +202,24 @@ def create_chatbot_interface(root_folder: str):
                     }
 
                     history.append({"role": "assistant", "content": response})
+
                     return (
                         "",
                         history,
                         state,
-                        gr.update(visible=True, open=True),
-                        gr.update(choices=[], value=None),
+                        gr.Dropdown(choices=[], value=None),
                         f"**{result['operator']}** - {result['domain']}/{result['module']}/{result['source']}/{result['vendor']}",
                         text_content,
                         file_path_str
                     )
                 else:
-                    # Error or no operators found
                     history.append({"role": "assistant", "content": response})
                     return (
                         "",
                         history,
                         state,
-                        gr.update(visible=False),
-                        gr.update(choices=[], value=None),
-                        "",
+                        gr.Dropdown(choices=[], value=None),
+                        "*Query a layout to see available operators*",
                         "",
                         None
                     )
@@ -242,26 +228,27 @@ def create_chatbot_interface(root_folder: str):
                 response = chatbot.process_query(message)
                 history.append({"role": "assistant", "content": response})
 
-                # Keep layout panel state as is for non-layout queries
                 return (
                     "",
                     history,
                     state,
-                    gr.update(),  # don't change layout panel visibility
-                    gr.update(),  # don't change operator buttons
-                    gr.update(),  # don't change layout info
-                    gr.update(),  # don't change layout content
-                    gr.update()   # don't change download file
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update()
                 )
 
         def view_layout(operator, state):
             """View layout content for selected operator."""
-            if not state or not state.get('active') or not operator:
-                return "Please select an operator first.", None, state
+            if not state or not state.get('active'):
+                return "Please query a layout first (e.g., 'show layout for domain RA, module UC, source MSC, vendor Nokia')", None, state
+
+            if not operator:
+                return "Please select an operator from the dropdown.", None, state
 
             operators = state.get('operators', {})
             if operator not in operators:
-                return f"Operator '{operator}' not found. Please select from the list.", None, state
+                return f"Operator '{operator}' not found.", None, state
 
             file_path = operators[operator]
 
@@ -269,7 +256,6 @@ def create_chatbot_interface(root_folder: str):
                 content = read_excel_content(Path(file_path))
                 text_content = format_layout_content_text(content)
 
-                # Update state with current file
                 state = state.copy()
                 state['current_file_path'] = file_path
 
@@ -297,26 +283,26 @@ def create_chatbot_interface(root_folder: str):
                 'operators': {},
                 'current_file_path': None
             }
-            return [], new_state, gr.update(visible=False, open=False), gr.update(choices=[], value=None), "", "", None
+            return [], new_state, gr.Dropdown(choices=[], value=None), "*Query a layout to see available operators*", "", None
 
         # Wire up events
         msg.submit(
             process_message,
             [msg, chatbot_ui, layout_state],
-            [msg, chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
+            [msg, chatbot_ui, layout_state, operator_dropdown, layout_info, layout_content, download_file],
             queue=False
         )
 
         submit.click(
             process_message,
             [msg, chatbot_ui, layout_state],
-            [msg, chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
+            [msg, chatbot_ui, layout_state, operator_dropdown, layout_info, layout_content, download_file],
             queue=False
         )
 
         view_layout_btn.click(
             view_layout,
-            [operator_buttons, layout_state],
+            [operator_dropdown, layout_state],
             [layout_content, download_file, layout_state],
             queue=False
         )
@@ -331,7 +317,7 @@ def create_chatbot_interface(root_folder: str):
         clear.click(
             clear_chat,
             [layout_state],
-            [chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
+            [chatbot_ui, layout_state, operator_dropdown, layout_info, layout_content, download_file],
             queue=False
         )
 
@@ -344,19 +330,16 @@ def create_chatbot_interface(root_folder: str):
 def main():
     """Main entry point for the application."""
 
-    # Configuration - Use environment variable or default path
     ROOT_FOLDER = os.getenv(
         "MAPPING_ROOT_FOLDER",
         r"C:\Users\aditya.prasad\OneDrive - Mobileum\Documents\OneDrive - Mobileum\Tejas N's files - Templates"
     )
 
-    # Validate path
     if not Path(ROOT_FOLDER).exists():
         print(f"\nERROR: Root folder not found: {ROOT_FOLDER}")
         print("Please set MAPPING_ROOT_FOLDER environment variable or update ROOT_FOLDER in src/app.py")
         return
 
-    # Create and launch interface
     demo = create_chatbot_interface(ROOT_FOLDER)
 
     print("\n" + "="*70)
