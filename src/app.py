@@ -351,7 +351,8 @@ def main():
         server_port=8848,
         share=False,
         show_error=True,
-        quiet=False
+        quiet=False,
+        allowed_paths=[ROOT_FOLDER]
     )
 
 
