@@ -111,12 +111,12 @@ def create_chatbot_interface(root_folder: str):
             gr.Examples(
                 examples=[
                     "Give me the mapping for field 'customer_id'",
-                    "Show mapping for AccountNumber from source SAP",
+                    "Show mapping for AccountNumber from source MSC",
                     "What is the mapping for 'email' vendor Oracle",
                     "Find all mappings in module CRM",
                     "Show dimension Sales field Revenue",
-                    "get me logics for 'event_type' where source is RA, module is UC and source name is MSC and vendor is Nokia",
-                    "get me logics for 'event_type' where source is RA, module is UC, source name is MSC, vendor is Nokia and operator is DU",
+                    "get me logics for 'event_type' where domain is RA, module is UC and source is MSC and vendor is Nokia",
+                    "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU",
                     "list",
                     "stats",
                     "cache stats",
@@ -131,16 +131,16 @@ def create_chatbot_interface(root_folder: str):
             gr.Markdown("""
             ### Commands:
             - `help` - Detailed help guide
-            - `list` or `sources` - View all available sources
+            - `list` or `sources` - View all available domains
             - `stats` - View loading statistics
             - `cache stats` - View cache performance
             - `clear cache` - Clear all cached files
-            
+
             ### Search Tips:
             - Use quotes for exact field names: `'customer_id'`
             - All filters are optional and case-insensitive
             - Combine filters: `field 'email' vendor Oracle module CRM operator Airtel`
-            - Results show the complete drill-down hierarchy including operator and filename
+            - Results show the complete drill-down hierarchy: Domain → Module → Source → Vendor → Operator
             - **Operator** is extracted from filenames automatically
             - Filter by operator: `... and operator is DU`
             """)

@@ -62,9 +62,9 @@ RAFM_Chatbot/
 
 ```
 MAPPING_ROOT_FOLDER/
-├── Source/
+├── Domain/
 │   ├── Module/
-│   │   ├── SourceName/
+│   │   ├── Source/
 │   │   │   ├── Vendor/
 │   │   │   │   └── LdRules/
 │   │   │   │       ├── LdRules_Vendor.xlsx
@@ -72,9 +72,9 @@ MAPPING_ROOT_FOLDER/
 ```
 
 **4-Level Hierarchy:**
-1. **Source** - Top-level (e.g., RA, CRM, ERP)
+1. **Domain** - Top-level (e.g., RA, CRM, ERP)
 2. **Module** - Business area (e.g., UC, Billing)
-3. **SourceName** - Source system (e.g., MSC, Oracle)
+3. **Source** - Source system (e.g., MSC, Oracle)
 4. **Vendor** - Provider (e.g., Nokia, Airtel)
 
 ## Configuration
@@ -99,11 +99,11 @@ MappingChatBot(
 
 ```
 "Give me the mapping for field 'customer_id'"
-"Show mapping for AccountNumber from source SAP"
+"Show mapping for AccountNumber from source MSC"
 "Find all mappings in module CRM"
 "Show dimension Sales field Revenue"
-"get me logics for 'event_type' where source is RA, module is UC,
- source name is MSC, vendor is Nokia and operator is DU"
+"get me logics for 'event_type' where domain is RA, module is UC,
+ source is MSC, vendor is Nokia and operator is DU"
 ```
 
 ## Key Features

@@ -16,7 +16,7 @@ from src.cache import configure_cache, get_cache, ExcelCache
 
 def process_single_folder(args):
     """Process a single LdRules folder (for parallel processing)"""
-    folder_path, source, module, source_name, vendor, cache_enabled = args
+    folder_path, domain, module, source, vendor, cache_enabled = args
 
     try:
         # Get cache instance if enabled
@@ -31,14 +31,14 @@ def process_single_folder(args):
 
         return {
             'success': True,
-            'key': (source, module, source_name, vendor),
+            'key': (domain, module, source, vendor),
             'mappings': mappings,
             'filename_info': filename_info,
             'expression_filenames': expression_filenames,
             'metadata': {
-                'source': source,
+                'domain': domain,
                 'module': module,
-                'source_name': source_name,
+                'source': source,
                 'vendor': vendor,
                 'path': str(folder_path),
                 'count': len(mappings)
@@ -71,7 +71,7 @@ class MappingChatBot:
         Initialize the chatbot.
 
         Args:
-            root_folder: Root folder containing Source/Module/SourceName/Vendor/LdRules structure
+            root_folder: Root folder containing Domain/Module/Source/Vendor/LdRules structure
             use_parallel: Whether to use parallel processing for loading
             max_workers: Maximum number of parallel workers
             cache_enabled: Whether to enable caching for Excel files
@@ -106,7 +106,7 @@ class MappingChatBot:
         Scan the folder structure and return all LdRules paths.
 
         Returns:
-            List of tuples: (ld_rules_path, source, module, source_name, vendor)
+            List of tuples: (ld_rules_path, domain, module, source, vendor)
         """
         paths_to_process = []
         root_path = Path(self.root_folder)
@@ -114,23 +114,23 @@ class MappingChatBot:
         if not root_path.exists():
             raise FileNotFoundError(f"Root folder not found: {self.root_folder}")
 
-        # Navigate through Source/Module/SourceName/Vendor/LdRules
-        for source_dir in root_path.iterdir():
-            if not source_dir.is_dir():
+        # Navigate through Domain/Module/Source/Vendor/LdRules
+        for domain_dir in root_path.iterdir():
+            if not domain_dir.is_dir():
                 continue
-            source = source_dir.name
+            domain = domain_dir.name
 
-            for module_dir in source_dir.iterdir():
+            for module_dir in domain_dir.iterdir():
                 if not module_dir.is_dir():
                     continue
                 module = module_dir.name
 
-                for source_name_dir in module_dir.iterdir():
-                    if not source_name_dir.is_dir():
+                for source_dir in module_dir.iterdir():
+                    if not source_dir.is_dir():
                         continue
-                    source_name = source_name_dir.name
+                    source = source_dir.name
 
-                    for vendor_dir in source_name_dir.iterdir():
+                    for vendor_dir in source_dir.iterdir():
                         if not vendor_dir.is_dir():
                             continue
                         vendor = vendor_dir.name
@@ -138,7 +138,7 @@ class MappingChatBot:
                         ld_rules_path = vendor_dir / "LdRules"
                         if ld_rules_path.exists() and ld_rules_path.is_dir():
                             paths_to_process.append(
-                                (ld_rules_path, source, module, source_name, vendor)
+                                (ld_rules_path, domain, module, source, vendor)
                             )
 
         return paths_to_process
@@ -204,13 +204,13 @@ class MappingChatBot:
 
     def _load_sequential(self, paths_to_process):
         """Load mappings sequentially with progress bar."""
-        for folder_path, source, module, source_name, vendor in tqdm(
+        for folder_path, domain, module, source, vendor in tqdm(
             paths_to_process,
             desc="Loading",
             unit="folder",
             ncols=100
         ):
-            result = process_single_folder((folder_path, source, module, source_name, vendor, self.cache_enabled))
+            result = process_single_folder((folder_path, domain, module, source, vendor, self.cache_enabled))
 
             if result['success']:
                 key = result['key']
@@ -224,7 +224,7 @@ class MappingChatBot:
     def extract_operator_from_filename(
         self,
         filename: str,
-        source_name: str,
+        source: str,
         vendor: str
     ) -> str:
         """
@@ -232,7 +232,7 @@ class MappingChatBot:
 
         Logic:
         1. Remove 'LdRules' prefix (case-insensitive)
-        2. Remove source_name (case-insensitive)
+        2. Remove source (case-insensitive)
         3. Remove vendor (case-insensitive)
         4. Remove numeric values
         5. Remove common separators and clean up
@@ -240,7 +240,7 @@ class MappingChatBot:
 
         Args:
             filename: The Excel filename (without extension)
-            source_name: The source name from folder structure
+            source: The source name from folder structure
             vendor: The vendor name from folder structure
 
         Returns:
@@ -266,9 +266,9 @@ class MappingChatBot:
         # Split by common separators
         parts = re.split(r'[_\-\s]+', remaining)
 
-        # Filter out parts that match source_name, vendor, or are numeric
+        # Filter out parts that match source, vendor, or are numeric
         filtered_parts = []
-        source_name_lower = source_name.lower()
+        source_lower = source.lower()
         vendor_lower = vendor.lower()
 
         for part in parts:
@@ -278,8 +278,8 @@ class MappingChatBot:
             if not part_lower:
                 continue
 
-            # Skip if it matches source_name (exact or partial)
-            if part_lower == source_name_lower or source_name_lower in part_lower or part_lower in source_name_lower:
+            # Skip if it matches source (exact or partial)
+            if part_lower == source_lower or source_lower in part_lower or part_lower in source_lower:
                 continue
 
             # Skip if it matches vendor (exact or partial)
@@ -314,16 +314,16 @@ class MappingChatBot:
             query: Natural language query string
 
         Returns:
-            Dictionary with extracted entities: field, source, module, source_name, vendor, operator
+            Dictionary with extracted entities: field, domain, module, source, vendor, operator
         """
         query_lower = query.lower()
 
         result = {
             'field': None,
             'dimension': None,
-            'source': None,
+            'domain': None,
             'module': None,
-            'source_name': None,
+            'source': None,
             'vendor': None,
             'operator': None
         }
@@ -371,33 +371,31 @@ class MappingChatBot:
                 result['module'] = match.group(1)
                 break
 
-        # === SOURCE NAME EXTRACTION ===
-        source_name_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"(?:in|for|from)\s+source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"source\s+name\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
-            r"(?:where|and)\s+(?:my\s+)?sourcename\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+        # === DOMAIN EXTRACTION ===
+        domain_patterns = [
+            r"(?:where|and)\s+(?:my\s+)?domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:in|for|from)\s+domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"domain\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
         ]
 
-        for pattern in source_name_patterns:
+        for pattern in domain_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                result['source_name'] = match.group(1)
+                result['domain'] = match.group(1)
                 break
 
         # === SOURCE EXTRACTION ===
         source_patterns = [
-            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
-            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?(?!\s*name)",
+            r"(?:where|and)\s+(?:my\s+)?source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"(?:in|for|from)\s+source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
+            r"source\s+(?:is\s+)?['\"]?([^'\".,;\s]+)['\"]?",
         ]
 
         for pattern in source_patterns:
             match = re.search(pattern, query_lower)
             if match:
-                if "source name" not in query_lower[match.start():match.end() + 10]:
-                    result['source'] = match.group(1)
-                    break
+                result['source'] = match.group(1)
+                break
 
         # === VENDOR EXTRACTION ===
         vendor_patterns = [
@@ -579,9 +577,9 @@ class MappingChatBot:
 
         field = parsed_query.get('field')
         dimension = parsed_query.get('dimension')
-        source = parsed_query.get('source')
+        domain = parsed_query.get('domain')
         module = parsed_query.get('module')
-        source_name = parsed_query.get('source_name')
+        source = parsed_query.get('source')
         vendor = parsed_query.get('vendor')
         operator = parsed_query.get('operator')
 
@@ -590,16 +588,16 @@ class MappingChatBot:
         if vendor:
             vendors_list = [v.strip() for v in re.split(r'\s+or\s+|\s+and\s+', vendor.lower())]
 
-        # Filter by metadata (source, module, etc.)
+        # Filter by metadata (domain, module, etc.)
         for key, mappings in self.mappings_data.items():
-            src, mod, src_name, vend = key
+            dom, mod, src, vend = key
 
             # Apply metadata filters (case-insensitive partial matching)
-            if source and source.lower() not in src.lower():
+            if domain and domain.lower() not in dom.lower():
                 continue
             if module and module.lower() not in mod.lower():
                 continue
-            if source_name and source_name.lower() not in src_name.lower():
+            if source and source.lower() not in src.lower():
                 continue
 
             # Vendor matching
@@ -658,16 +656,16 @@ class MappingChatBot:
                         filename = "Unknown"
 
                     # Extract operator from filename
-                    extracted_operator = self.extract_operator_from_filename(filename, src_name, vend)
+                    extracted_operator = self.extract_operator_from_filename(filename, src, vend)
 
                     # Apply operator filter if specified
                     if operator and not self.operator_matches(operator, extracted_operator):
                         continue
 
                     results.append({
-                        'source': src,
+                        'domain': dom,
                         'module': mod,
-                        'source_name': src_name,
+                        'source': src,
                         'vendor': vend,
                         'dimension': left_val,
                         'field': field_val,
@@ -720,7 +718,7 @@ class MappingChatBot:
 
             # Metadata with drill-down hierarchy including operator
             response += f"- **Dimension/Measure:** `{result['dimension']}`\n"
-            response += f"- **Source:** {result['source']} → **Module:** {result['module']} → **Source Name:** {result['source_name']} → **Vendor:** {result['vendor']} → **Operator:** {result['operator']}\n"
+            response += f"- **Domain:** {result['domain']} → **Module:** {result['module']} → **Source:** {result['source']} → **Vendor:** {result['vendor']} → **Operator:** {result['operator']}\n"
             response += f"- **File:** `{result['filename']}`\n"
 
             # Add match quality information
@@ -810,7 +808,7 @@ class MappingChatBot:
         )[:10]
 
         for i, meta in enumerate(sorted_meta, 1):
-            response += f"\n{i}. **{meta['source']}/{meta['module']}/{meta['vendor']}**: {meta.get('count', 0)} mappings"
+            response += f"\n{i}. **{meta['domain']}/{meta['module']}/{meta['vendor']}**: {meta.get('count', 0)} mappings"
 
         return response
 
@@ -849,22 +847,22 @@ class MappingChatBot:
             return f"* Error clearing cache: {str(e)}"
 
     def list_all_sources(self) -> str:
-        """List all available sources in the system."""
+        """List all available domains in the system."""
         response = "## Available Data Sources\n\n"
 
-        # Group by source
-        by_source = {}
+        # Group by domain
+        by_domain = {}
         for meta in self.metadata:
-            source = meta['source']
-            if source not in by_source:
-                by_source[source] = []
-            by_source[source].append(meta)
+            domain = meta['domain']
+            if domain not in by_domain:
+                by_domain[domain] = []
+            by_domain[domain].append(meta)
 
-        for source, items in sorted(by_source.items()):
-            response += f"### **{source}**\n\n"
+        for domain, items in sorted(by_domain.items()):
+            response += f"### **{domain}**\n\n"
             for meta in items:
                 response += (
-                    f"   - {meta['module']} → {meta['source_name']} → "
+                    f"   - {meta['module']} → {meta['source']} → "
                     f"{meta['vendor']} *({meta.get('count', 0)} mappings)*\n"
                 )
             response += "\n"
@@ -882,12 +880,12 @@ Ask questions naturally! The bot understands various formats:
 **Example Queries:**
 
 - "Give me the mapping for field 'customer_id'"
-- "Show mapping for AccountNumber from source SAP"
+- "Show mapping for AccountNumber from source MSC"
 - "What is the mapping for 'email' vendor Oracle"
 - "Find field address in module CRM"
 - "All mappings for vendor Salesforce"
 - "Show dimension Sales field Revenue"
-- "get me logics for 'event_type' where source is RA, module is UC, source name is MSC, vendor is Nokia and operator is DU"
+- "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU"
 
 ### Search Filters
 
@@ -895,15 +893,15 @@ You can filter by any combination of:
 
 - **Field Name** - The target field you're looking for
 - **Dimension/Measure** - The left column value (Dim./Meas.)
-- **Source** - Top-level source folder
+- **Domain** - Top-level domain folder
 - **Module** - Second-level module folder
-- **Source Name** - Third-level source name folder
+- **Source** - Third-level source folder
 - **Vendor** - Fourth-level vendor folder
 - **Operator** - Extracted from filename (e.g., DU, Airtel, Vodafone)
 
 ### Special Commands
 
-- `list` or `sources` - List all available sources and vendors
+- `list` or `sources` - List all available domains and vendors
 - `stats` - Show loading statistics and top vendors
 - `cache stats` or `cache` - Show cache performance statistics
 - `clear cache` - Clear all cached Excel files
@@ -913,7 +911,7 @@ You can filter by any combination of:
 
 * All filters are **optional** and **case-insensitive**
 * Use quotes for exact matches: `'customer_id'`
-* Partial matches work: "SAP" will match "SAP_PROD"
+* Partial matches work: "MSC" will match "MSC_PROD"
 * Combine filters for precise results
 * Results show dimension/measure alongside field name
 * **Operator** is automatically extracted from filenames
@@ -924,7 +922,7 @@ Each result shows:
 - **Dimension/Measure** - Category from column B
 - **Field** - Field name from column C
 - **Expression** - Mapping value from column D
-- **Drill-down Hierarchy** - Source → Module → Source Name → Vendor → Operator
+- **Drill-down Hierarchy** - Domain → Module → Source → Vendor → Operator
 - **File** - The Excel file where this expression was found
 - **Operator** - Extracted from the filename
 
