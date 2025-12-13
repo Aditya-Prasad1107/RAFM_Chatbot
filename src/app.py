@@ -85,18 +85,15 @@ def create_chatbot_interface(root_folder: str):
         with gr.Row():
             clear = gr.Button("Clear Chat")
 
-        # Layout Panel (initially hidden)
-        with gr.Group(visible=False) as layout_panel:
-            gr.Markdown("### Layout Viewer")
-
+        # Layout Panel (collapsible accordion)
+        with gr.Accordion("Layout Viewer", open=False, visible=False) as layout_panel:
             layout_info = gr.Markdown("Select an operator to view layout content")
 
-            with gr.Row():
-                operator_buttons = gr.Radio(
-                    choices=[],
-                    label="Available Operators",
-                    interactive=True
-                )
+            operator_buttons = gr.Radio(
+                choices=[],
+                label="Available Operators",
+                interactive=True
+            )
 
             with gr.Row():
                 view_layout_btn = gr.Button("View Layout")
@@ -105,13 +102,13 @@ def create_chatbot_interface(root_folder: str):
             # Scrollable content display
             layout_content = gr.Textbox(
                 label="Layout Content (select all and copy with Ctrl+C)",
-                lines=15,
-                max_lines=30,
+                lines=20,
+                max_lines=40,
                 interactive=False
             )
 
-            # Hidden file output for download
-            download_file = gr.File(label="Download", visible=False)
+            # File output for download
+            download_file = gr.File(label="Click to download", visible=True)
 
         with gr.Accordion("Example Queries", open=False):
             gr.Examples(
@@ -157,6 +154,9 @@ def create_chatbot_interface(root_folder: str):
 
         def process_message(message, history, state):
             """Process user message and update UI accordingly."""
+            if not message or not message.strip():
+                return "", history or [], state, gr.update(), gr.update(), "", "", None
+
             if not history:
                 history = []
 
@@ -170,23 +170,27 @@ def create_chatbot_interface(root_folder: str):
                 if metadata and metadata['type'] == 'layout_operators' and metadata['result']['success']:
                     # Update state with layout info
                     result = metadata['result']
+
+                    # Convert Path objects to strings in operators dict
+                    operators_str = {k: str(v) for k, v in result['operators'].items()}
+
                     state = {
                         'active': True,
                         'domain': result['domain'],
                         'module': result['module'],
                         'source': result['source'],
                         'vendor': result['vendor'],
-                        'operators': result['operators'],
+                        'operators': operators_str,
                         'current_file_path': None
                     }
-                    operators_list = list(result['operators'].keys())
+                    operators_list = list(operators_str.keys())
 
                     history.append({"role": "assistant", "content": response})
                     return (
                         "",  # clear message
                         history,
                         state,
-                        gr.update(visible=True),  # show layout panel
+                        gr.update(visible=True, open=True),  # show layout panel
                         gr.update(choices=operators_list, value=operators_list[0] if operators_list else None),
                         f"**{result['domain']}/{result['module']}/{result['source']}/{result['vendor']}** - Select an operator and click 'View Layout'",
                         "",  # clear content
@@ -197,6 +201,7 @@ def create_chatbot_interface(root_folder: str):
                     result = metadata['result']
                     content = result['content']
                     text_content = format_layout_content_text(content)
+                    file_path_str = str(result['file_path'])
 
                     state = {
                         'active': True,
@@ -205,7 +210,7 @@ def create_chatbot_interface(root_folder: str):
                         'source': result['source'],
                         'vendor': result['vendor'],
                         'operators': {},
-                        'current_file_path': result['file_path']
+                        'current_file_path': file_path_str
                     }
 
                     history.append({"role": "assistant", "content": response})
@@ -213,11 +218,11 @@ def create_chatbot_interface(root_folder: str):
                         "",
                         history,
                         state,
-                        gr.update(visible=True),
+                        gr.update(visible=True, open=True),
                         gr.update(choices=[], value=None),
                         f"**{result['operator']}** - {result['domain']}/{result['module']}/{result['source']}/{result['vendor']}",
                         text_content,
-                        result['file_path']
+                        file_path_str
                     )
                 else:
                     # Error or no operators found
@@ -237,41 +242,45 @@ def create_chatbot_interface(root_folder: str):
                 response = chatbot.process_query(message)
                 history.append({"role": "assistant", "content": response})
 
-                # Hide layout panel for non-layout queries
-                new_state = state.copy() if isinstance(state, dict) else {}
-                new_state['active'] = False
-
+                # Keep layout panel state as is for non-layout queries
                 return (
                     "",
                     history,
-                    new_state,
-                    gr.update(visible=False),
-                    gr.update(choices=[], value=None),
-                    "",
-                    "",
-                    None
+                    state,
+                    gr.update(),  # don't change layout panel visibility
+                    gr.update(),  # don't change operator buttons
+                    gr.update(),  # don't change layout info
+                    gr.update(),  # don't change layout content
+                    gr.update()   # don't change download file
                 )
 
         def view_layout(operator, state):
             """View layout content for selected operator."""
-            if not state.get('active') or not operator:
-                return "", None, state
+            if not state or not state.get('active') or not operator:
+                return "Please select an operator first.", None, state
 
             operators = state.get('operators', {})
             if operator not in operators:
-                return f"Operator '{operator}' not found", None, state
+                return f"Operator '{operator}' not found. Please select from the list.", None, state
 
             file_path = operators[operator]
-            content = read_excel_content(Path(file_path))
-            text_content = format_layout_content_text(content)
 
-            # Update state with current file
-            state['current_file_path'] = str(file_path)
+            try:
+                content = read_excel_content(Path(file_path))
+                text_content = format_layout_content_text(content)
 
-            return text_content, str(file_path), state
+                # Update state with current file
+                state = state.copy()
+                state['current_file_path'] = file_path
+
+                return text_content, file_path, state
+            except Exception as e:
+                return f"Error reading file: {str(e)}", None, state
 
         def download_original(state):
             """Return the original file path for download."""
+            if not state:
+                return None
             file_path = state.get('current_file_path')
             if file_path and Path(file_path).exists():
                 return file_path
@@ -288,7 +297,7 @@ def create_chatbot_interface(root_folder: str):
                 'operators': {},
                 'current_file_path': None
             }
-            return [], new_state, gr.update(visible=False), gr.update(choices=[], value=None), "", "", None
+            return [], new_state, gr.update(visible=False, open=False), gr.update(choices=[], value=None), "", "", None
 
         # Wire up events
         msg.submit(
