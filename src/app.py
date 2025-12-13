@@ -1,5 +1,6 @@
 """
 Gradio web interface for Mapping ChatBot with Layout viewing support.
+Compatible with multiple Gradio versions.
 """
 import os
 import time
@@ -9,7 +10,6 @@ from typing import Optional, Dict, Any, List
 import gradio as gr
 from src.chatbot import MappingChatBot
 from src.layout_extractor import read_excel_content, format_layout_content_text
-
 
 
 def create_chatbot_interface(root_folder: str):
@@ -45,7 +45,7 @@ def create_chatbot_interface(root_folder: str):
         print("\nWARNING: No data loaded! Please check your folder structure.")
 
     # Create Gradio interface
-    with gr.Blocks(title="RAFM Chatbot") as demo:
+    with gr.Blocks() as demo:
 
         # State for layout context
         layout_state = gr.State({
@@ -71,25 +71,22 @@ def create_chatbot_interface(root_folder: str):
         chatbot_ui = gr.Chatbot(
             label="Chat",
             height=500,
-            show_label=False,
-            elem_id="chatbot"
+            show_label=False
         )
 
         with gr.Row():
             msg = gr.Textbox(
                 placeholder="Ask about mappings or layouts... (e.g., 'show layout for domain RA, module UC, source MSC, vendor Nokia')",
                 show_label=False,
-                scale=9,
-                container=False,
                 lines=1
             )
-            submit = gr.Button("Send", scale=1, variant="primary")
+            submit = gr.Button("Send")
 
         with gr.Row():
-            clear = gr.Button("Clear Chat", scale=1)
+            clear = gr.Button("Clear Chat")
 
         # Layout Panel (initially hidden)
-        with gr.Group(visible=False, elem_id="layout-panel") as layout_panel:
+        with gr.Group(visible=False) as layout_panel:
             gr.Markdown("### Layout Viewer")
 
             layout_info = gr.Markdown("Select an operator to view layout content")
@@ -102,17 +99,15 @@ def create_chatbot_interface(root_folder: str):
                 )
 
             with gr.Row():
-                view_layout_btn = gr.Button("View Layout", variant="primary")
-                download_btn = gr.Button("Download Original File", variant="secondary")
-                copy_btn = gr.Button("Copy Content", variant="secondary")
+                view_layout_btn = gr.Button("View Layout")
+                download_btn = gr.Button("Download Original File")
 
             # Scrollable content display
             layout_content = gr.Textbox(
-                label="Layout Content",
+                label="Layout Content (select all and copy with Ctrl+C)",
                 lines=15,
                 max_lines=30,
-                interactive=False,
-                show_copy_button=True
+                interactive=False
             )
 
             # Hidden file output for download
