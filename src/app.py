@@ -10,52 +10,6 @@ import gradio as gr
 from src.chatbot import MappingChatBot
 from src.layout_extractor import read_excel_content, format_layout_content_text
 
-# Custom CSS for better UI
-CUSTOM_CSS = """
-.gradio-container {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    max-width: 1400px !important;
-}
-
-.message {
-    padding: 10px;
-    border-radius: 8px;
-    margin: 5px 0;
-}
-
-footer {
-    display: none !important;
-}
-
-#chatbot {
-    height: 500px;
-}
-
-.contain {
-    max-width: 100% !important;
-}
-
-.layout-content {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    padding: 10px;
-    background: #fafafa;
-    font-family: monospace;
-    font-size: 12px;
-}
-
-.operator-btn {
-    margin: 2px;
-}
-
-#layout-panel {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 15px;
-    background: #f9f9f9;
-}
-"""
 
 
 def create_chatbot_interface(root_folder: str):
@@ -91,7 +45,7 @@ def create_chatbot_interface(root_folder: str):
         print("\nWARNING: No data loaded! Please check your folder structure.")
 
     # Create Gradio interface
-    with gr.Blocks(title="RAFM Chatbot", css=CUSTOM_CSS) as demo:
+    with gr.Blocks(title="RAFM Chatbot") as demo:
 
         # State for layout context
         layout_state = gr.State({
