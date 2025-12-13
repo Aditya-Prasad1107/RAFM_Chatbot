@@ -1,12 +1,14 @@
 """
-Gradio web interface for Mapping ChatBot.
+Gradio web interface for Mapping ChatBot with Layout viewing support.
 """
 import os
 import time
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 
 import gradio as gr
 from src.chatbot import MappingChatBot
+from src.layout_extractor import read_excel_content, format_layout_content_text
 
 # Custom CSS for better UI
 CUSTOM_CSS = """
@@ -26,11 +28,32 @@ footer {
 }
 
 #chatbot {
-    height: 600px;
+    height: 500px;
 }
 
 .contain {
     max-width: 100% !important;
+}
+
+.layout-content {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    background: #fafafa;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.operator-btn {
+    margin: 2px;
+}
+
+#layout-panel {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    background: #f9f9f9;
 }
 """
 
@@ -67,36 +90,40 @@ def create_chatbot_interface(root_folder: str):
     if not chatbot.mappings_data:
         print("\nWARNING: No data loaded! Please check your folder structure.")
 
-    # Chat response function
-    def respond(message, history):
-        """Generate response for user message."""
-        response = chatbot.process_query(message)
-        return response
-
     # Create Gradio interface
-    with gr.Blocks(title="Mapping ChatBot") as demo:
-        demo.theme = gr.themes.Soft()
-        demo.css = CUSTOM_CSS
+    with gr.Blocks(title="RAFM Chatbot", css=CUSTOM_CSS) as demo:
+
+        # State for layout context
+        layout_state = gr.State({
+            'active': False,
+            'domain': None,
+            'module': None,
+            'source': None,
+            'vendor': None,
+            'operators': {},
+            'current_file_path': None
+        })
 
         gr.Markdown(
             f"""
             # RAFM Chatbot
-            ### Ask questions about field mappings in natural language
-            
+            ### Ask questions about field mappings or view layout files
+
             **Status:** Loaded **{len(chatbot.mappings_data)}** vendors in **{init_time:.2f}s**
             """
         )
 
+        # Main chat interface
         chatbot_ui = gr.Chatbot(
             label="Chat",
-            height=600,
+            height=500,
             show_label=False,
             elem_id="chatbot"
         )
 
         with gr.Row():
             msg = gr.Textbox(
-                placeholder="Ask about field mappings... (e.g., 'Show mapping for customer_id')",
+                placeholder="Ask about mappings or layouts... (e.g., 'show layout for domain RA, module UC, source MSC, vendor Nokia')",
                 show_label=False,
                 scale=9,
                 container=False,
@@ -106,6 +133,36 @@ def create_chatbot_interface(root_folder: str):
 
         with gr.Row():
             clear = gr.Button("Clear Chat", scale=1)
+
+        # Layout Panel (initially hidden)
+        with gr.Group(visible=False, elem_id="layout-panel") as layout_panel:
+            gr.Markdown("### Layout Viewer")
+
+            layout_info = gr.Markdown("Select an operator to view layout content")
+
+            with gr.Row():
+                operator_buttons = gr.Radio(
+                    choices=[],
+                    label="Available Operators",
+                    interactive=True
+                )
+
+            with gr.Row():
+                view_layout_btn = gr.Button("View Layout", variant="primary")
+                download_btn = gr.Button("Download Original File", variant="secondary")
+                copy_btn = gr.Button("Copy Content", variant="secondary")
+
+            # Scrollable content display
+            layout_content = gr.Textbox(
+                label="Layout Content",
+                lines=15,
+                max_lines=30,
+                interactive=False,
+                show_copy_button=True
+            )
+
+            # Hidden file output for download
+            download_file = gr.File(label="Download", visible=False)
 
         with gr.Accordion("Example Queries", open=False):
             gr.Examples(
@@ -117,10 +174,9 @@ def create_chatbot_interface(root_folder: str):
                     "Show dimension Sales field Revenue",
                     "get me logics for 'event_type' where domain is RA, module is UC and source is MSC and vendor is Nokia",
                     "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU",
+                    "show layout for domain RA, module UC, source MSC, vendor Nokia",
                     "list",
                     "stats",
-                    "cache stats",
-                    "clear cache",
                     "help"
                 ],
                 inputs=msg,
@@ -136,57 +192,190 @@ def create_chatbot_interface(root_folder: str):
             - `cache stats` - View cache performance
             - `clear cache` - Clear all cached files
 
-            ### Search Tips:
+            ### Mapping Queries:
             - Use quotes for exact field names: `'customer_id'`
-            - All filters are optional and case-insensitive
             - Combine filters: `field 'email' vendor Oracle module CRM operator Airtel`
-            - Results show the complete drill-down hierarchy: Domain → Module → Source → Vendor → Operator
-            - **Operator** is extracted from filenames automatically
-            - Filter by operator: `... and operator is DU`
+            - Results show hierarchy: Domain → Module → Source → Vendor → Operator
+
+            ### Layout Queries:
+            - `show layout for domain X, module Y, source Z, vendor W`
+            - `give me the format for domain X, module Y, source Z, vendor W`
+            - Click operator buttons to view content
+            - Download original file or copy content
             """)
 
-        # Event handlers
-        def user_message(message, history):
-            """Add user message to chat."""
+        # ==================== Event Handlers ====================
+
+        def process_message(message, history, state):
+            """Process user message and update UI accordingly."""
             if not history:
                 history = []
-            new_history = history + [{"role": "user", "content": message}]
-            return "", new_history
 
-        def bot_response(history):
-            """Generate and add bot response."""
-            if not history:
-                return []
-            user_msg = history[-1]["content"] if history[-1]["role"] == "user" else ""
-            bot_msg = respond(user_msg, history)
-            history.append({"role": "assistant", "content": bot_msg})
-            return history
+            # Add user message
+            history = history + [{"role": "user", "content": message}]
 
-        # Submit on Enter or button click
+            # Check if layout query
+            if chatbot.is_layout_query(message):
+                response, metadata = chatbot.process_layout_query(message)
+
+                if metadata and metadata['type'] == 'layout_operators' and metadata['result']['success']:
+                    # Update state with layout info
+                    result = metadata['result']
+                    state = {
+                        'active': True,
+                        'domain': result['domain'],
+                        'module': result['module'],
+                        'source': result['source'],
+                        'vendor': result['vendor'],
+                        'operators': result['operators'],
+                        'current_file_path': None
+                    }
+                    operators_list = list(result['operators'].keys())
+
+                    history.append({"role": "assistant", "content": response})
+                    return (
+                        "",  # clear message
+                        history,
+                        state,
+                        gr.update(visible=True),  # show layout panel
+                        gr.update(choices=operators_list, value=operators_list[0] if operators_list else None),
+                        f"**{result['domain']}/{result['module']}/{result['source']}/{result['vendor']}** - Select an operator and click 'View Layout'",
+                        "",  # clear content
+                        None  # no file
+                    )
+                elif metadata and metadata['type'] == 'layout_content' and metadata['result']['success']:
+                    # Direct content display (operator was specified)
+                    result = metadata['result']
+                    content = result['content']
+                    text_content = format_layout_content_text(content)
+
+                    state = {
+                        'active': True,
+                        'domain': result['domain'],
+                        'module': result['module'],
+                        'source': result['source'],
+                        'vendor': result['vendor'],
+                        'operators': {},
+                        'current_file_path': result['file_path']
+                    }
+
+                    history.append({"role": "assistant", "content": response})
+                    return (
+                        "",
+                        history,
+                        state,
+                        gr.update(visible=True),
+                        gr.update(choices=[], value=None),
+                        f"**{result['operator']}** - {result['domain']}/{result['module']}/{result['source']}/{result['vendor']}",
+                        text_content,
+                        result['file_path']
+                    )
+                else:
+                    # Error or no operators found
+                    history.append({"role": "assistant", "content": response})
+                    return (
+                        "",
+                        history,
+                        state,
+                        gr.update(visible=False),
+                        gr.update(choices=[], value=None),
+                        "",
+                        "",
+                        None
+                    )
+            else:
+                # Regular mapping query
+                response = chatbot.process_query(message)
+                history.append({"role": "assistant", "content": response})
+
+                # Hide layout panel for non-layout queries
+                new_state = state.copy() if isinstance(state, dict) else {}
+                new_state['active'] = False
+
+                return (
+                    "",
+                    history,
+                    new_state,
+                    gr.update(visible=False),
+                    gr.update(choices=[], value=None),
+                    "",
+                    "",
+                    None
+                )
+
+        def view_layout(operator, state):
+            """View layout content for selected operator."""
+            if not state.get('active') or not operator:
+                return "", None, state
+
+            operators = state.get('operators', {})
+            if operator not in operators:
+                return f"Operator '{operator}' not found", None, state
+
+            file_path = operators[operator]
+            content = read_excel_content(Path(file_path))
+            text_content = format_layout_content_text(content)
+
+            # Update state with current file
+            state['current_file_path'] = str(file_path)
+
+            return text_content, str(file_path), state
+
+        def download_original(state):
+            """Return the original file path for download."""
+            file_path = state.get('current_file_path')
+            if file_path and Path(file_path).exists():
+                return file_path
+            return None
+
+        def clear_chat(state):
+            """Clear chat and reset state."""
+            new_state = {
+                'active': False,
+                'domain': None,
+                'module': None,
+                'source': None,
+                'vendor': None,
+                'operators': {},
+                'current_file_path': None
+            }
+            return [], new_state, gr.update(visible=False), gr.update(choices=[], value=None), "", "", None
+
+        # Wire up events
         msg.submit(
-            user_message,
-            [msg, chatbot_ui],
-            [msg, chatbot_ui],
+            process_message,
+            [msg, chatbot_ui, layout_state],
+            [msg, chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
             queue=False
-        ).then(
-            bot_response,
-            chatbot_ui,
-            chatbot_ui
         )
 
         submit.click(
-            user_message,
-            [msg, chatbot_ui],
-            [msg, chatbot_ui],
+            process_message,
+            [msg, chatbot_ui, layout_state],
+            [msg, chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
             queue=False
-        ).then(
-            bot_response,
-            chatbot_ui,
-            chatbot_ui
         )
 
-        # Clear chat
-        clear.click(lambda: [], None, chatbot_ui, queue=False)
+        view_layout_btn.click(
+            view_layout,
+            [operator_buttons, layout_state],
+            [layout_content, download_file, layout_state],
+            queue=False
+        )
+
+        download_btn.click(
+            download_original,
+            [layout_state],
+            [download_file],
+            queue=False
+        )
+
+        clear.click(
+            clear_chat,
+            [layout_state],
+            [chatbot_ui, layout_state, layout_panel, operator_buttons, layout_info, layout_content, download_file],
+            queue=False
+        )
 
         gr.Markdown("---")
         gr.Markdown("*Tip: Type 'help' for detailed usage instructions*")

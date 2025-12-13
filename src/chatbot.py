@@ -2,16 +2,24 @@
 Optimized Mapping ChatBot with parallel loading, caching, and natural language processing.
 Properly tracks and displays which filename each expression comes from.
 Includes Operator extraction from filenames and operator-based filtering.
+Supports Layout file viewing with operator-based selection.
 """
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import time
 
 from src.extractor import extract_combined_field_mappings_from_folder
 from src.cache import configure_cache, get_cache, ExcelCache
+from src.layout_extractor import (
+    get_layout_folder_path,
+    get_available_operators,
+    read_excel_content,
+    format_excel_as_markdown_table,
+    format_layout_content_text
+)
 
 
 def process_single_folder(args):
@@ -775,6 +783,11 @@ class MappingChatBot:
         if query_lower in ['clear cache', 'clearcache', 'reset cache']:
             return self.clear_cache()
 
+        # Check if this is a layout query
+        if self.is_layout_query(query):
+            response, metadata = self.process_layout_query(query)
+            return response
+
         # Parse and search
         parsed = self.parse_query(query)
         results = self.search_mappings(parsed)
@@ -869,6 +882,337 @@ class MappingChatBot:
 
         return response
 
+    # ==================== LAYOUT METHODS ====================
+
+    def is_layout_query(self, query: str) -> bool:
+        """
+        Check if the query is asking for layout/format/decoder information.
+
+        Args:
+            query: User query string
+
+        Returns:
+            True if this is a layout query
+        """
+        query_lower = query.lower()
+        layout_keywords = ['layout', 'format', 'decoder', 'structure', 'schema']
+        trigger_phrases = [
+            'show me the', 'give me the', 'get me the', 'display the',
+            'show the', 'get the', 'give the', 'what is the'
+        ]
+
+        # Check for layout keywords
+        has_layout_keyword = any(kw in query_lower for kw in layout_keywords)
+
+        # Check for trigger phrases combined with layout keywords
+        has_trigger = any(phrase in query_lower for phrase in trigger_phrases)
+
+        return has_layout_keyword and (has_trigger or 'for' in query_lower)
+
+    def parse_layout_query(self, query: str) -> Dict[str, Optional[str]]:
+        """
+        Parse a layout query to extract domain, module, source, vendor.
+
+        Args:
+            query: User query string
+
+        Returns:
+            Dictionary with extracted entities
+        """
+        # Reuse the existing parse_query method
+        return self.parse_query(query)
+
+    def get_layout_operators(
+        self,
+        domain: str,
+        module: str,
+        source: str,
+        vendor: str
+    ) -> Dict[str, Any]:
+        """
+        Get available layout operators for the specified hierarchy.
+
+        Args:
+            domain: Domain name
+            module: Module name
+            source: Source name
+            vendor: Vendor name
+
+        Returns:
+            Dictionary with operators and their file paths, or error info
+        """
+        result = {
+            'success': False,
+            'operators': {},
+            'layout_path': None,
+            'error': None,
+            'domain': domain,
+            'module': module,
+            'source': source,
+            'vendor': vendor
+        }
+
+        # Find matching paths (case-insensitive)
+        root_path = Path(self.root_folder)
+
+        # Find matching domain
+        matched_domain = None
+        for d in root_path.iterdir():
+            if d.is_dir() and d.name.lower() == domain.lower():
+                matched_domain = d
+                break
+
+        if not matched_domain:
+            result['error'] = f"Domain '{domain}' not found"
+            return result
+
+        # Find matching module
+        matched_module = None
+        for m in matched_domain.iterdir():
+            if m.is_dir() and m.name.lower() == module.lower():
+                matched_module = m
+                break
+
+        if not matched_module:
+            result['error'] = f"Module '{module}' not found in domain '{domain}'"
+            return result
+
+        # Find matching source
+        matched_source = None
+        for s in matched_module.iterdir():
+            if s.is_dir() and s.name.lower() == source.lower():
+                matched_source = s
+                break
+
+        if not matched_source:
+            result['error'] = f"Source '{source}' not found in {domain}/{module}"
+            return result
+
+        # Find matching vendor
+        matched_vendor = None
+        for v in matched_source.iterdir():
+            if v.is_dir() and v.name.lower() == vendor.lower():
+                matched_vendor = v
+                break
+
+        if not matched_vendor:
+            result['error'] = f"Vendor '{vendor}' not found in {domain}/{module}/{source}"
+            return result
+
+        # Check for Layout folder
+        layout_path = matched_vendor / "Layout"
+        if not layout_path.exists() or not layout_path.is_dir():
+            result['error'] = f"No Layout folder found for {domain}/{module}/{source}/{vendor}"
+            return result
+
+        # Get operators
+        operators = get_available_operators(layout_path, source, vendor)
+
+        if not operators:
+            result['error'] = f"No layout files found in {domain}/{module}/{source}/{vendor}/Layout"
+            return result
+
+        result['success'] = True
+        result['operators'] = operators
+        result['layout_path'] = str(layout_path)
+        result['domain'] = matched_domain.name
+        result['module'] = matched_module.name
+        result['source'] = matched_source.name
+        result['vendor'] = matched_vendor.name
+
+        return result
+
+    def get_layout_content(
+        self,
+        domain: str,
+        module: str,
+        source: str,
+        vendor: str,
+        operator: str
+    ) -> Dict[str, Any]:
+        """
+        Get the layout content for a specific operator.
+
+        Args:
+            domain: Domain name
+            module: Module name
+            source: Source name
+            vendor: Vendor name
+            operator: Operator name
+
+        Returns:
+            Dictionary with layout content or error info
+        """
+        # First get the operators to find the file path
+        operators_result = self.get_layout_operators(domain, module, source, vendor)
+
+        if not operators_result['success']:
+            return {
+                'success': False,
+                'error': operators_result['error'],
+                'content': None
+            }
+
+        # Find the matching operator (case-insensitive)
+        file_path = None
+        matched_operator = None
+        for op, path in operators_result['operators'].items():
+            if op.lower() == operator.lower():
+                file_path = path
+                matched_operator = op
+                break
+
+        if not file_path:
+            return {
+                'success': False,
+                'error': f"Operator '{operator}' not found. Available: {', '.join(operators_result['operators'].keys())}",
+                'content': None
+            }
+
+        # Read the Excel content
+        content = read_excel_content(file_path)
+
+        return {
+            'success': True,
+            'error': None,
+            'content': content,
+            'operator': matched_operator,
+            'file_path': str(file_path),
+            'domain': operators_result['domain'],
+            'module': operators_result['module'],
+            'source': operators_result['source'],
+            'vendor': operators_result['vendor']
+        }
+
+    def format_layout_operators_response(self, operators_result: Dict[str, Any]) -> str:
+        """
+        Format the layout operators list for display.
+
+        Args:
+            operators_result: Result from get_layout_operators
+
+        Returns:
+            Formatted markdown string
+        """
+        if not operators_result['success']:
+            return f"* Error: {operators_result['error']}"
+
+        domain = operators_result['domain']
+        module = operators_result['module']
+        source = operators_result['source']
+        vendor = operators_result['vendor']
+        operators = operators_result['operators']
+
+        response = f"## Layout Files for {domain}/{module}/{source}/{vendor}\n\n"
+        response += f"Found **{len(operators)}** operator(s) with layout files:\n\n"
+
+        for op in sorted(operators.keys()):
+            response += f"- **{op}**\n"
+
+        response += "\n---\n"
+        response += "*To view layout content, click an operator button below or type:*\n"
+        response += f"*`show layout {list(operators.keys())[0]} for domain {domain}, module {module}, source {source}, vendor {vendor}`*"
+
+        return response
+
+    def format_layout_content_response(self, content_result: Dict[str, Any]) -> str:
+        """
+        Format the layout content for display.
+
+        Args:
+            content_result: Result from get_layout_content
+
+        Returns:
+            Formatted markdown string
+        """
+        if not content_result['success']:
+            return f"* Error: {content_result['error']}"
+
+        content = content_result['content']
+        operator = content_result['operator']
+        domain = content_result['domain']
+        module = content_result['module']
+        source = content_result['source']
+        vendor = content_result['vendor']
+
+        response = f"## Layout: {operator}\n"
+        response += f"**Path:** {domain} → {module} → {source} → {vendor}\n"
+        response += f"**File:** `{content['filename']}`\n\n"
+
+        if content.get('error'):
+            response += f"* Error reading file: {content['error']}\n"
+            return response
+
+        response += f"**Total Rows:** {content['total_rows']} | **Sheets:** {len(content['sheets'])}\n\n"
+
+        for sheet in content['sheets']:
+            response += f"### Sheet: {sheet['name']}\n"
+            response += f"*{sheet['row_count']} rows × {sheet['col_count']} columns*\n\n"
+
+            if sheet['headers'] and sheet['rows']:
+                # Format as markdown table
+                table = format_excel_as_markdown_table(sheet, max_col_width=40)
+                response += table + "\n\n"
+            else:
+                response += "*Empty sheet*\n\n"
+
+        return response
+
+    def process_layout_query(self, query: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Process a layout query and return response with metadata.
+
+        Args:
+            query: User query string
+
+        Returns:
+            Tuple of (response_string, metadata_dict)
+            metadata_dict contains info for UI to show buttons, etc.
+        """
+        parsed = self.parse_layout_query(query)
+
+        domain = parsed.get('domain')
+        module = parsed.get('module')
+        source = parsed.get('source')
+        vendor = parsed.get('vendor')
+        operator = parsed.get('operator')
+
+        # Check if all required fields are present
+        missing = []
+        if not domain:
+            missing.append('domain')
+        if not module:
+            missing.append('module')
+        if not source:
+            missing.append('source')
+        if not vendor:
+            missing.append('vendor')
+
+        if missing:
+            response = "* Please specify the following to view layout:\n"
+            for field in missing:
+                response += f"  - {field}\n"
+            response += "\n**Example:** `show layout for domain RA, module UC, source MSC, vendor Nokia`"
+            return response, None
+
+        # If operator is specified, get the content directly
+        if operator:
+            content_result = self.get_layout_content(domain, module, source, vendor, operator)
+            response = self.format_layout_content_response(content_result)
+            return response, {
+                'type': 'layout_content',
+                'result': content_result
+            }
+
+        # Otherwise, list available operators
+        operators_result = self.get_layout_operators(domain, module, source, vendor)
+        response = self.format_layout_operators_response(operators_result)
+
+        return response, {
+            'type': 'layout_operators',
+            'result': operators_result
+        }
+
     def get_help(self) -> str:
         """Return help text."""
         return """## Mapping ChatBot - Help Guide
@@ -877,7 +1221,7 @@ class MappingChatBot:
 
 Ask questions naturally! The bot understands various formats:
 
-**Example Queries:**
+**Mapping Queries:**
 
 - "Give me the mapping for field 'customer_id'"
 - "Show mapping for AccountNumber from source MSC"
@@ -886,6 +1230,13 @@ Ask questions naturally! The bot understands various formats:
 - "All mappings for vendor Salesforce"
 - "Show dimension Sales field Revenue"
 - "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU"
+
+**Layout/Format Queries:**
+
+- "Show layout for domain RA, module UC, source MSC, vendor Nokia"
+- "Give me the format for domain RA, module UC, source MSC, vendor Nokia"
+- "Get decoder for domain RA, module UC, source MSC, vendor Nokia"
+- "Show layout for domain RA, module UC, source MSC, vendor Nokia, operator DU"
 
 ### Search Filters
 
@@ -907,6 +1258,14 @@ You can filter by any combination of:
 - `clear cache` - Clear all cached Excel files
 - `help` - Show this help message
 
+### Layout Feature
+
+To view layout/format/decoder files:
+1. Ask for layout with domain, module, source, vendor
+2. System shows available operators (clickable buttons)
+3. Click an operator to view full content in scrollable view
+4. Download original file or copy content as needed
+
 ### Tips
 
 * All filters are **optional** and **case-insensitive**
@@ -918,13 +1277,17 @@ You can filter by any combination of:
 
 ### Understanding Results
 
-Each result shows:
+**Mapping Results:**
 - **Dimension/Measure** - Category from column B
 - **Field** - Field name from column C
 - **Expression** - Mapping value from column D
 - **Drill-down Hierarchy** - Domain → Module → Source → Vendor → Operator
 - **File** - The Excel file where this expression was found
-- **Operator** - Extracted from the filename
+
+**Layout Results:**
+- Shows all sheets from the layout file
+- Content displayed in scrollable table format
+- Download and copy options available
 
 ---
 
