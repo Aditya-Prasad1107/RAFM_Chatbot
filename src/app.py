@@ -10,7 +10,7 @@ import gradio as gr
 try:
     from src.chatbot import MappingChatBot
 except ImportError:
-    from chatbot import MappingChatBot
+    from chatbot import MappingChatBotF
 
 CUSTOM_CSS = """
 .gradio-container {
@@ -228,7 +228,7 @@ def create_chatbot_interface(root_folder: str):
 def main():
     ROOT_FOLDER = os.getenv(
         "MAPPING_ROOT_FOLDER",
-        r"C:\Users\aditya.prasad\OneDrive - Mobileum\Documents\OneDrive - Mobileum\Tejas N's files - Templates"
+        r"C:\Users\aditya.prasad\OneDrive - Mobileum\Documents\OneDrive - Mobileum\Template Hierarchy Structure - Templates"
     )
 
     if not Path(ROOT_FOLDER).exists():
@@ -244,8 +244,8 @@ def main():
 
     demo.launch(
         server_name="127.0.0.1",
-        server_port=8948,
-        share=False,
+        server_port=8848,
+        share=True,
         show_error=True,
         quiet=False
     )

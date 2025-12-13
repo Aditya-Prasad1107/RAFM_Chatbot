@@ -684,6 +684,10 @@ class MappingChatBot:
         if query_stripped.startswith('/'):
             return self._process_special_command(query_stripped)
 
+        # === "GET ALL MAPPINGS" QUERY ===
+        if self._is_get_all_mappings_query(query_lower):
+            return self._process_get_all_mappings_query(query)
+
         # Try hierarchy query
         if self.hierarchy_parser and self.hierarchy_parser.is_hierarchy_query(query):
             result = self._process_hierarchy_query(query)
@@ -741,6 +745,162 @@ class MappingChatBot:
 
         # Unknown command
         return f"❌ Unknown command: `{command}`\n\nType `/help` to see available commands."
+
+    def _is_get_all_mappings_query(self, query_lower: str) -> bool:
+        """Check if query is a 'get all mappings' type query."""
+        patterns = [
+            r'get\s+all\s+mappings',
+            r'show\s+all\s+mappings',
+            r'list\s+all\s+mappings',
+            r'all\s+mappings\s+(?:for|where|from)',
+            r'give\s+(?:me\s+)?all\s+mappings',
+        ]
+        for pattern in patterns:
+            if re.search(pattern, query_lower):
+                return True
+        return False
+
+    def _process_get_all_mappings_query(self, query: str) -> str:
+        """Process 'get all mappings' query with validation."""
+        # Parse the query to extract filters
+        if self.enhanced_parser:
+            parsed = self.enhanced_parser.parse_query(query)
+        else:
+            parsed = self.parse_query(query)
+
+        domain = parsed.get('domain')
+        module = parsed.get('module')
+        source = parsed.get('source')
+        vendor = parsed.get('vendor')
+        operator = parsed.get('operator')
+
+        # Validation: Domain + Module + Source + Vendor are ALL required
+        missing = []
+        if not domain:
+            missing.append('Domain')
+        if not module:
+            missing.append('Module')
+        if not source:
+            missing.append('Source')
+        if not vendor:
+            missing.append('Vendor')
+
+        if missing:
+            return (
+                f"❌ **Error:** Missing required filters: **{', '.join(missing)}**\n\n"
+                f"To get all mappings, you must specify **Domain + Module + Source + Vendor** (Operator is optional).\n\n"
+                f"**Example queries:**\n"
+                f"- `Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia`\n"
+                f"- `Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU`"
+            )
+
+        # Search for all mappings (no field filter)
+        results = self._search_all_mappings(domain, module, source, vendor, operator)
+
+        if not results:
+            filter_str = f"Domain={domain}, Module={module}, Source={source}, Vendor={vendor}"
+            if operator:
+                filter_str += f", Operator={operator}"
+            return f"❌ No mappings found for: {filter_str}"
+
+        # Format as table
+        return self._format_all_mappings_table(results, domain, module, source, vendor, operator)
+
+    def _search_all_mappings(
+        self,
+        domain: str,
+        module: str,
+        source: str,
+        vendor: str,
+        operator: Optional[str] = None
+    ) -> List[Dict]:
+        """Search for all mappings matching the given filters (no field filter)."""
+        results = []
+
+        for key, mappings in self.mappings_data.items():
+            dom, mod, src, vend = key
+
+            # Apply filters (case-insensitive)
+            if domain.upper() not in dom.upper():
+                continue
+            if module.upper() not in mod.upper():
+                continue
+            if source.upper() not in src.upper():
+                continue
+            if vendor.upper() not in vend.upper():
+                continue
+
+            vendor_filename_info = self.filename_data.get(key, {})
+            vendor_expression_filenames = self.expression_filenames_data.get(key, {})
+
+            for mapping_key, expressions in mappings.items():
+                left_val, field_val = mapping_key
+
+                valid_expressions = self.filter_valid_expressions(expressions)
+
+                if not valid_expressions:
+                    continue
+
+                expr_filenames = vendor_expression_filenames.get(mapping_key, [])
+                unique_filenames = vendor_filename_info.get(mapping_key, [])
+
+                for i, expression in enumerate(valid_expressions):
+                    if i < len(expr_filenames):
+                        filename = expr_filenames[i]
+                    elif unique_filenames:
+                        filename = unique_filenames[0]
+                    else:
+                        filename = "Unknown"
+
+                    extracted_operator = self.extract_operator_from_filename(filename, src, vend)
+
+                    # Filter by operator if specified
+                    if operator and not self.operator_matches(operator, extracted_operator):
+                        continue
+
+                    results.append({
+                        'dimension': left_val,
+                        'field': field_val,
+                        'expression': expression,
+                        'operator': extracted_operator.upper(),
+                        'filename': filename,
+                    })
+
+        # Sort by dimension, then field
+        results.sort(key=lambda x: (x['dimension'], x['field']))
+        return results
+
+    def _format_all_mappings_table(
+        self,
+        results: List[Dict],
+        domain: str,
+        module: str,
+        source: str,
+        vendor: str,
+        operator: Optional[str] = None
+    ) -> str:
+        """Format all mappings as a table."""
+        filter_str = f"**Domain:** {domain.upper()} → **Module:** {module.upper()} → **Source:** {source.upper()} → **Vendor:** {vendor.upper()}"
+        if operator:
+            filter_str += f" → **Operator:** {operator.upper()}"
+
+        response = f"## All Mappings\n\n{filter_str}\n\n"
+        response += f"**Total:** {len(results)} mapping(s)\n\n"
+
+        # Table header
+        response += "| Dimension/Measure/Detailed | Field | Expression |\n"
+        response += "|----------------------------|-------|------------|\n"
+
+        # Table rows
+        for result in results:
+            # Escape pipe characters in expression and truncate if too long
+            expr = result['expression'].replace('|', '\\|').replace('\n', ' ')
+            if len(expr) > 100:
+                expr = expr[:97] + "..."
+
+            response += f"| {result['dimension']} | {result['field']} | `{expr}` |\n"
+
+        return response
 
     def _process_hierarchy_query(self, query: str) -> Optional[str]:
         """Process a hierarchy navigation query."""
@@ -977,6 +1137,14 @@ Find all mappings in module CRM
 get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU
 ```
 
+### Get All Mappings (Table Format)
+```
+Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia
+Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU
+Show all mappings for domain RA module UC source MSC vendor Ericsson
+```
+*Note: Domain + Module + Source + Vendor are required. Operator is optional.*
+
 ### Hierarchy Navigation Queries
 ```
 How many modules under domain RA?
@@ -1020,6 +1188,15 @@ Ask questions naturally! The bot understands various formats:
 - "What is the mapping for 'email' vendor Oracle"
 - "Find field address in module CRM"
 - "get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU"
+
+### Get All Mappings (Table Format)
+
+Get all mappings for a specific vendor combination without specifying a field:
+- "Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia"
+- "Get all mappings where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU"
+
+**Required:** Domain + Module + Source + Vendor (all 4 mandatory)
+**Optional:** Operator
 
 ### Search Filters
 

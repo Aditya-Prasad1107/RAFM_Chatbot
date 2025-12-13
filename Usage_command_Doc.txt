@@ -1,0 +1,301 @@
+================================================================================
+                    RAFM CHATBOT - COMPLETE QUERY REFERENCE
+================================================================================
+
+Hierarchy Structure: Domain → Module → Source → Vendor → Operator
+All values are displayed in UPPERCASE.
+
+================================================================================
+                              SPECIAL COMMANDS
+================================================================================
+
+/help
+/list
+/stats
+/hierarchy
+/vendors
+/modules
+/sources
+/operators
+/examples
+
+================================================================================
+                          FIELD MAPPING QUERIES
+================================================================================
+
+# Basic field search
+Give me the mapping for field 'customer_id'
+Show mapping for AccountNumber
+What is the mapping for 'email'
+Find field address
+get me logics for 'event_type'
+
+# With single filter
+Show mapping for 'customer_id' from domain RA
+Find mapping for 'email' vendor Nokia
+Show field 'amount' module UC
+Find mapping for 'duration' source MSC
+Show logics for 'call_type' operator DU
+
+# With multiple filters
+get me logics for 'event_type' where domain is RA, module is UC
+get me logics for 'event_type' where domain is RA, module is UC, source is MSC
+get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia
+get me logics for 'event_type' where domain is RA, module is UC, source is MSC, vendor is Nokia and operator is DU
+
+================================================================================
+                           GLOBAL/TOTAL QUERIES
+================================================================================
+
+Total number of domains
+Total number of modules
+Total number of sources
+Total number of vendors
+Total number of operators
+How many domains?
+How many modules?
+How many sources?
+How many vendors?
+How many operators?
+
+================================================================================
+                        LIST ALL UNIQUE ITEMS
+================================================================================
+
+All unique sources
+All unique vendor names
+All unique operator names
+List all domains
+List all modules
+List all sources
+List all vendors
+List all operators
+
+================================================================================
+                            GROUPED QUERIES
+================================================================================
+
+Modules grouped by domain
+Vendors grouped by domain
+Operators grouped by vendor
+
+================================================================================
+                             TOP N QUERIES
+================================================================================
+
+Top 5 vendors with most operators
+Top 10 vendors by operator count
+Top 5 domains with most modules
+Top 10 domains by module count
+Top 3 vendors with most operators
+Top 20 domains by module count
+
+================================================================================
+                          ZERO/EMPTY QUERIES
+================================================================================
+
+Modules with zero sources
+Sources with zero vendors
+Vendors with zero operators
+
+================================================================================
+                          FROM DOMAIN QUERIES
+================================================================================
+
+# Count queries
+How many modules under domain RA?
+How many sources under domain RA?
+How many vendors under domain RA?
+How many operators under domain RA?
+Number of modules under domain FMS
+Number of sources under domain FMS
+Number of vendors under domain FMS
+Number of operators under domain FMS
+
+# List queries
+List modules under domain RA
+List sources under domain RA
+List vendors under domain RA
+List operators under domain RA
+Modules under domain RA
+Sources under domain RA
+Vendors under domain RA
+Operators under domain RA
+Show modules under domain FMS
+Show sources under domain FMS
+Show vendors under domain FMS
+Show operators under domain FMS
+
+# Filter: More than N operators
+Vendors under domain RA with more than 2 operators
+Vendors under domain RA with more than 5 operators
+Vendors under domain FMS with more than 3 operators
+
+# Filter: Containing keyword
+Sources under domain RA containing MSC
+Sources under domain RA containing HLR
+Sources under domain FMS containing CCN
+
+# Filter: With at least N sources
+Modules under domain RA with at least 3 sources
+Modules under domain FMS with at least 2 sources
+
+# Filter: Matching pattern
+Operators under domain RA matching pattern DU*
+Operators under domain RA matching pattern *AIRTEL*
+Operators under domain FMS matching pattern *ETISALAT*
+
+================================================================================
+                          FROM MODULE QUERIES
+================================================================================
+
+# Count queries
+How many sources under module UC?
+How many vendors under module UC?
+How many operators under module UC?
+Number of sources under module PI
+Number of vendors under module PI
+Number of operators under module PI
+Number of sources under module GENERIC
+Number of vendors under module GENERIC
+Number of operators under module GENERIC
+
+# List queries
+List sources under module UC
+List vendors under module UC
+List operators under module UC
+Sources under module PI
+Vendors under module PI
+Operators under module PI
+Show sources under module GENERIC
+Show vendors under module GENERIC
+Show operators under module GENERIC
+
+# Filter: Containing keyword
+Sources under module UC containing MSC
+Sources under module UC containing IN
+Sources under module PI containing OUT
+
+# Filter: More than N operators
+Vendors under module UC with more than 3 operators
+Vendors under module PI with more than 2 operators
+Vendors under module GENERIC with more than 5 operators
+
+# Filter: Matching pattern
+Operators under module UC matching pattern *DU*
+Operators under module PI matching pattern *GP*
+Operators under module GENERIC matching pattern ETISALAT*
+
+================================================================================
+                          FROM SOURCE QUERIES
+================================================================================
+
+# Count queries
+How many vendors under source MSC?
+How many operators under source MSC?
+Number of vendors under source HLR
+Number of operators under source HLR
+Number of vendors under source CCN
+Number of operators under source CCN
+
+# List queries
+List vendors under source MSC
+List operators under source MSC
+Vendors under source HLR
+Operators under source HLR
+Show vendors under source CCN
+Show operators under source CCN
+
+# Filter: More than N operators
+Vendors under source MSC with more than 2 operators
+Vendors under source HLR with more than 3 operators
+Vendors under source CCN with more than 1 operators
+
+# Filter: Matching pattern
+Operators under source MSC matching pattern *AIRTEL*
+Operators under source HLR matching pattern DU*
+Operators under source CCN matching pattern *FMS*
+
+================================================================================
+                          FROM VENDOR QUERIES
+================================================================================
+
+# Count queries
+How many operators under vendor Nokia?
+How many operators under vendor Ericsson?
+How many operators under vendor Huawei?
+How many operators under vendor ZTE?
+Number of operators under vendor Nokia
+Number of operators under vendor Ericsson
+Number of operators under vendor Huawei
+
+# List queries
+List operators under vendor Nokia
+List operators under vendor Ericsson
+List operators under vendor Huawei
+Operators under vendor Nokia
+Operators under vendor Ericsson
+Operators under vendor ZTE
+Show operators under vendor Huawei
+
+# Filter: Matching pattern
+Operators under vendor Nokia matching pattern DU*
+Operators under vendor Ericsson matching pattern *GP*
+Operators under vendor Huawei matching pattern *AIRTEL*
+Operators under vendor ZTE matching pattern OCAM*
+
+================================================================================
+                         PATTERN MATCHING EXAMPLES
+================================================================================
+
+# Prefix patterns (starts with)
+Operators matching pattern DU*
+Operators matching pattern ETISALAT*
+Operators matching pattern GP*
+
+# Suffix patterns (ends with)
+Operators matching pattern *XDR
+Operators matching pattern *CCN
+Operators matching pattern *OUT
+
+# Contains patterns
+Operators matching pattern *AIRTEL*
+Operators matching pattern *IN*
+Operators matching pattern *FMS*
+
+# Keyword contains
+Sources containing MSC
+Sources containing HLR
+Sources containing CCN
+Vendors containing ERIC
+Vendors containing NOK
+
+================================================================================
+                      QUERY PATTERN QUICK REFERENCE
+================================================================================
+
++----------------+--------------------------------------------------+
+| Context Level  | What You Can Query                               |
++----------------+--------------------------------------------------+
+| Global         | Domains, Modules, Sources, Vendors, Operators    |
+| From Domain    | Modules, Sources, Vendors, Operators             |
+| From Module    | Sources, Vendors, Operators                      |
+| From Source    | Vendors, Operators                               |
+| From Vendor    | Operators                                        |
++----------------+--------------------------------------------------+
+
+================================================================================
+                           QUERY SYNTAX TIPS
+================================================================================
+
+1. Use quotes for exact field names: 'customer_id'
+2. All filters are case-insensitive
+3. Use "under" or "in" or "from" interchangeably
+4. Use "with more than N" for numeric filters
+5. Use "containing" for keyword search
+6. Use "matching pattern" with * for wildcards
+7. Combine multiple filters with "where", "and", commas
+
+================================================================================
+                              END OF REFERENCE
+================================================================================
